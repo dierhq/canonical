@@ -1,0 +1,287 @@
+"""
+Command-line interface for the Canonical SIEM rule converter.
+"""
+
+import asyncio
+import sys
+from pathlib import Path
+from typing import Optional
+import click
+from loguru import logger
+
+from .core.config import settings
+from .core.models import SourceFormat, TargetFormat
+from .core.converter import rule_converter
+from .data_ingestion.sigma_ingestion import sigma_ingestion
+
+
+@click.group()
+@click.option('--debug', is_flag=True, help='Enable debug logging')
+@click.option('--log-file', help='Log file path')
+def cli(debug: bool, log_file: Optional[str]):
+    """Canonical SIEM Rule Converter CLI."""
+    # Configure logging
+    log_level = "DEBUG" if debug else settings.log_level
+    logger.remove()
+    
+    if log_file:
+        logger.add(log_file, level=log_level)
+    else:
+        logger.add(sys.stderr, level=log_level)
+    
+    logger.info(f"Starting Canonical CLI v{settings.app_version}")
+
+
+@cli.command()
+@click.argument('source_file', type=click.Path(exists=True, path_type=Path))
+@click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl']))
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma']), help='Source format')
+@click.option('--output', '-o', type=click.Path(path_type=Path), help='Output file path')
+@click.option('--verbose', '-v', is_flag=True, help='Verbose output')
+def convert(source_file: Path, target_format: str, source_format: str, output: Optional[Path], verbose: bool):
+    """Convert a rule from source format to target format."""
+    async def _convert():
+        try:
+            # Read source rule
+            with open(source_file, 'r', encoding='utf-8') as f:
+                source_rule = f.read()
+            
+            # Convert rule
+            response = await rule_converter.convert_rule(
+                source_rule=source_rule,
+                source_format=SourceFormat(source_format),
+                target_format=TargetFormat(target_format)
+            )
+            
+            if response.success:
+                click.echo(f"✅ Conversion successful (confidence: {response.confidence_score:.2f})")
+                
+                if verbose:
+                    click.echo(f"\nExplanation: {response.explanation}")
+                    if response.mitre_techniques:
+                        click.echo(f"MITRE Techniques: {', '.join(response.mitre_techniques)}")
+                
+                # Output converted rule
+                if output:
+                    with open(output, 'w', encoding='utf-8') as f:
+                        f.write(response.target_rule)
+                    click.echo(f"Converted rule saved to: {output}")
+                else:
+                    click.echo("\nConverted Rule:")
+                    click.echo("-" * 40)
+                    click.echo(response.target_rule)
+            else:
+                click.echo(f"❌ Conversion failed: {response.error_message}")
+                sys.exit(1)
+                
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_convert())
+
+
+@cli.command()
+@click.argument('rules_dir', type=click.Path(exists=True, path_type=Path))
+@click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl']))
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma']), help='Source format')
+@click.option('--output-dir', '-o', type=click.Path(path_type=Path), help='Output directory')
+@click.option('--max-concurrent', default=5, help='Maximum concurrent conversions')
+def batch_convert(rules_dir: Path, target_format: str, source_format: str, output_dir: Optional[Path], max_concurrent: int):
+    """Convert multiple rules in batch."""
+    async def _batch_convert():
+        try:
+            # Find all rule files
+            rule_files = []
+            for ext in ['*.yml', '*.yaml']:
+                rule_files.extend(rules_dir.rglob(ext))
+            
+            if not rule_files:
+                click.echo("No rule files found")
+                return
+            
+            click.echo(f"Found {len(rule_files)} rule files")
+            
+            # Prepare rules for batch conversion
+            rules = []
+            for rule_file in rule_files:
+                with open(rule_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                rules.append({
+                    "content": content,
+                    "source_format": SourceFormat(source_format),
+                    "file_path": rule_file
+                })
+            
+            # Convert rules
+            with click.progressbar(length=len(rules), label='Converting rules') as bar:
+                responses = await rule_converter.batch_convert(
+                    rules=rules,
+                    target_format=TargetFormat(target_format),
+                    max_concurrent=max_concurrent
+                )
+                bar.update(len(responses))
+            
+            # Process results
+            successful = 0
+            failed = 0
+            
+            for i, response in enumerate(responses):
+                rule_file = rule_files[i]
+                
+                if response.success:
+                    successful += 1
+                    
+                    if output_dir:
+                        output_file = output_dir / f"{rule_file.stem}.{target_format}"
+                        output_file.parent.mkdir(parents=True, exist_ok=True)
+                        
+                        with open(output_file, 'w', encoding='utf-8') as f:
+                            f.write(response.target_rule)
+                else:
+                    failed += 1
+                    click.echo(f"❌ Failed to convert {rule_file.name}: {response.error_message}")
+            
+            click.echo(f"\n✅ Batch conversion completed: {successful} successful, {failed} failed")
+            
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_batch_convert())
+
+
+@cli.command()
+@click.argument('rule_file', type=click.Path(exists=True, path_type=Path))
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma']), help='Source format')
+def validate(rule_file: Path, source_format: str):
+    """Validate a rule without converting it."""
+    async def _validate():
+        try:
+            # Read rule
+            with open(rule_file, 'r', encoding='utf-8') as f:
+                rule_content = f.read()
+            
+            # Validate rule
+            result = await rule_converter.validate_rule(
+                rule_content=rule_content,
+                source_format=SourceFormat(source_format)
+            )
+            
+            if result["valid"]:
+                click.echo("✅ Rule is valid")
+                click.echo(f"Title: {result['title']}")
+                if result["description"]:
+                    click.echo(f"Description: {result['description']}")
+                if result["mitre_techniques"]:
+                    click.echo(f"MITRE Techniques: {', '.join(result['mitre_techniques'])}")
+                if result["complexity"]:
+                    click.echo(f"Complexity: {result['complexity']['complexity_level']}")
+            else:
+                click.echo("❌ Rule is invalid")
+                for error in result["errors"]:
+                    click.echo(f"  - {error}")
+                sys.exit(1)
+                
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_validate())
+
+
+@cli.command()
+def formats():
+    """List supported formats."""
+    async def _formats():
+        try:
+            formats = await rule_converter.get_supported_formats()
+            
+            click.echo("Supported formats:")
+            click.echo(f"  Source: {', '.join(formats['source_formats'])}")
+            click.echo(f"  Target: {', '.join(formats['target_formats'])}")
+            
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_formats())
+
+
+@cli.command()
+def stats():
+    """Show conversion statistics and system status."""
+    async def _stats():
+        try:
+            stats = await rule_converter.get_conversion_stats()
+            
+            click.echo("System Status:")
+            click.echo(f"  Initialized: {stats['initialized']}")
+            
+            if "collections" in stats:
+                click.echo("\nCollections:")
+                for name, info in stats["collections"].items():
+                    if "error" in info:
+                        click.echo(f"  {name}: ❌ {info['error']}")
+                    else:
+                        click.echo(f"  {name}: {info.get('count', 0)} documents")
+            
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_stats())
+
+
+@cli.group()
+def data():
+    """Data ingestion commands."""
+    pass
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of repository')
+def ingest_sigma(force_refresh: bool):
+    """Ingest Sigma rules from SigmaHQ repository."""
+    async def _ingest():
+        try:
+            click.echo("Starting Sigma rules ingestion...")
+            
+            stats = await sigma_ingestion.ingest_sigma_rules(force_refresh=force_refresh)
+            
+            click.echo(f"✅ Ingestion completed:")
+            click.echo(f"  Total files: {stats['total_files']}")
+            click.echo(f"  Successful: {stats['successful']}")
+            click.echo(f"  Failed: {stats['failed']}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@cli.command()
+@click.option('--host', default='0.0.0.0', help='Host to bind to')
+@click.option('--port', default=8000, help='Port to bind to')
+@click.option('--reload', is_flag=True, help='Enable auto-reload')
+def serve(host: str, port: int, reload: bool):
+    """Start the API server."""
+    import uvicorn
+    
+    uvicorn.run(
+        "canonical.api.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level=settings.log_level.lower()
+    )
+
+
+def main():
+    """Main entry point."""
+    cli()
+
+
+if __name__ == "__main__":
+    main() 

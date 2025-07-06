@@ -1,0 +1,40 @@
+# Core dependencies
+langgraph>=0.0.55
+chromadb>=0.4.18
+sentence-transformers>=2.2.2
+transformers>=4.35.0
+torch>=2.1.0
+
+# Qwen model dependencies
+qwen-agent>=0.0.3
+modelscope>=1.9.0
+
+# YAML and rule parsing
+pyyaml>=6.0.1
+ruamel.yaml>=0.17.32
+
+# Data processing
+pandas>=2.1.0
+numpy>=1.24.0
+requests>=2.31.0
+
+# API and web framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.4.0
+
+# Logging and utilities
+loguru>=0.7.2
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+
+# Git operations for data ingestion
+gitpython>=3.1.40
+
+# CLI interface
+click>=8.1.0
+
+# Optional: Jupyter for experimentation
+jupyter>=1.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0 

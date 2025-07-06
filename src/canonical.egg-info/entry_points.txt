@@ -1,0 +1,3 @@
+[console_scripts]
+canonical = canonical.cli:main
+

@@ -1,0 +1,371 @@
+Metadata-Version: 2.1
+Name: canonical
+Version: 0.1.0
+Summary: Intelligent SIEM rule converter that transforms security rules between different formats
+Home-page: https://github.com/canonical/canonical
+Author: Canonical Team
+Author-email: team@canonical.dev
+License: UNKNOWN
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Information Technology
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Topic :: Security
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Provides-Extra: dev
+
+# Canonical - Intelligent SIEM Rule Converter
+
+Canonical is an intelligent SIEM rule converter that transforms security rules between different formats using advanced AI techniques. It leverages LangGraph workflows, BGE text embeddings, Qwen language models, and ChromaDB for robust and context-aware rule conversion.
+
+## 🚀 Features
+
+- **Multi-format Support**: Convert Sigma rules to KustoQL, Kibana Query Language, EQL, QRadar AQL, and Splunk SPL
+- **AI-Powered Conversion**: Uses Qwen language models for intelligent rule translation
+- **Context-Aware**: Leverages MITRE ATT&CK, CAR analytics, and Atomic Red Team data for enhanced conversion accuracy
+- **Vector-Based Similarity**: Uses BGE embeddings and ChromaDB for finding similar rules and techniques
+- **Workflow-Based**: Built on LangGraph for robust, multi-step conversion pipelines
+- **Batch Processing**: Support for converting multiple rules simultaneously
+- **REST API**: FastAPI-based web service for integration
+- **CLI Interface**: Command-line tool for direct usage
+
+## 🏗️ Architecture
+
+The system is built on a modern, scalable architecture:
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Sigma Rules   │    │  MITRE ATT&CK   │    │ Atomic Red Team │
+│   (SigmaHQ)     │    │   Framework     │    │     Tests       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │    ChromaDB     │
+                    │ Vector Database │
+                    └─────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │ BGE Embeddings  │
+                    │   (BAAI/bge)    │
+                    └─────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │   LangGraph     │
+                    │   Workflow      │
+                    └─────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │  Qwen LLM       │
+                    │  (Qwen2.5-7B)   │
+                    └─────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │  Target Format  │
+                    │ (KustoQL, SPL,  │
+                    │  EQL, etc.)     │
+                    └─────────────────┘
+```
+
+## 📦 Installation
+
+### Prerequisites
+
+- Python 3.9+
+- Git
+- 8GB+ RAM (for running language models)
+- CUDA-compatible GPU (optional, for better performance)
+
+### Install from Source
+
+```bash
+git clone https://github.com/canonical/canonical.git
+cd canonical
+pip install -e .
+```
+
+### Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Development Installation
+
+```bash
+pip install -e ".[dev]"
+```
+
+## 🚀 Quick Start
+
+### 1. Initialize the System
+
+First, ingest the knowledge base data:
+
+```bash
+# Ingest Sigma rules from SigmaHQ
+canonical data ingest-sigma
+
+# The system will automatically download and process:
+# - Sigma rules from SigmaHQ repository
+# - MITRE ATT&CK framework data
+# - MITRE CAR analytics
+# - Atomic Red Team tests
+```
+
+### 2. Convert a Single Rule
+
+```bash
+# Convert a Sigma rule to KustoQL
+canonical convert rule.yml kustoql
+
+# Convert with verbose output
+canonical convert rule.yml spl --verbose
+
+# Save to file
+canonical convert rule.yml eql --output converted_rule.eql
+```
+
+### 3. Batch Convert Rules
+
+```bash
+# Convert all rules in a directory
+canonical batch-convert ./sigma_rules/ kustoql --output-dir ./converted_rules/
+```
+
+### 4. Start the API Server
+
+```bash
+# Start the REST API server
+canonical serve --host 0.0.0.0 --port 8000
+
+# The API will be available at http://localhost:8000
+# Documentation at http://localhost:8000/docs
+```
+
+## 🔧 Configuration
+
+Create a `.env` file in the project root:
+
+```env
+# API Settings
+API_HOST=0.0.0.0
+API_PORT=8000
+DEBUG=false
+
+# Model Settings
+EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
+QWEN_MODEL=Qwen/Qwen2.5-7B-Instruct
+EMBEDDING_DEVICE=cpu
+QWEN_DEVICE=cpu
+
+# Database Settings
+CHROMADB_PATH=./data/chromadb
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FILE=./logs/canonical.log
+```
+
+## 🌐 API Usage
+
+### Convert a Rule
+
+```bash
+curl -X POST "http://localhost:8000/convert" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_rule": "title: Test Rule\ndetection:\n  condition: selection\n  selection:\n    EventID: 4688\nlogsource:\n  category: process_creation",
+    "source_format": "sigma",
+    "target_format": "kustoql"
+  }'
+```
+
+### Batch Convert Rules
+
+```bash
+curl -X POST "http://localhost:8000/convert/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rules": [
+      {
+        "content": "...",
+        "source_format": "sigma"
+      }
+    ],
+    "target_format": "spl"
+  }'
+```
+
+### Validate a Rule
+
+```bash
+curl -X POST "http://localhost:8000/validate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule": "title: Test Rule\n...",
+    "source_format": "sigma"
+  }'
+```
+
+## 🐍 Python API
+
+```python
+import asyncio
+from canonical import RuleConverter, SourceFormat, TargetFormat
+
+async def main():
+    converter = RuleConverter()
+    await converter.initialize()
+    
+    # Convert a Sigma rule to KustoQL
+    sigma_rule = """
+    title: Suspicious PowerShell Command
+    detection:
+      condition: selection
+      selection:
+        EventID: 4688
+        Image: '*powershell.exe'
+        CommandLine: '*-EncodedCommand*'
+    logsource:
+      category: process_creation
+      product: windows
+    """
+    
+    response = await converter.convert_rule(
+        source_rule=sigma_rule,
+        source_format=SourceFormat.SIGMA,
+        target_format=TargetFormat.KUSTOQL
+    )
+    
+    if response.success:
+        print("Converted rule:")
+        print(response.target_rule)
+        print(f"Confidence: {response.confidence_score}")
+    else:
+        print(f"Conversion failed: {response.error_message}")
+
+asyncio.run(main())
+```
+
+## 📊 Supported Formats
+
+### Source Formats
+- **Sigma**: Universal signature format for SIEM systems
+
+### Target Formats
+- **KustoQL**: Azure Data Explorer / Microsoft Sentinel
+- **Kibana Query Language**: Elastic Stack / Kibana
+- **EQL**: Event Query Language (Elastic)
+- **QRadar AQL**: IBM QRadar
+- **SPL**: Splunk Processing Language
+
+## 🧠 Knowledge Base
+
+The system uses multiple knowledge sources for enhanced conversion:
+
+1. **Sigma Rules**: Complete SigmaHQ repository with 3000+ rules
+2. **MITRE ATT&CK**: Techniques, tactics, groups, and software
+3. **MITRE CAR**: Cyber Analytics Repository with detection analytics
+4. **Atomic Red Team**: Atomic tests mapped to MITRE techniques
+
+## 🔍 How It Works
+
+1. **Parse**: Parse the source rule and extract components
+2. **Contextualize**: Find related MITRE techniques and similar rules
+3. **Enrich**: Gather context from knowledge base (CAR, Atomic Red Team)
+4. **Convert**: Use Qwen LLM with rich context to generate target rule
+5. **Validate**: Validate the converted rule and provide confidence score
+
+## 🛠️ Development
+
+### Project Structure
+
+```
+canonical/
+├── src/canonical/
+│   ├── api/                 # FastAPI application
+│   ├── core/               # Core models and converter
+│   ├── data_ingestion/     # Data ingestion scripts
+│   ├── parsers/            # Rule parsers (Sigma, etc.)
+│   ├── services/           # Services (LLM, embeddings, ChromaDB)
+│   └── workflows/          # LangGraph workflows
+├── tests/                  # Test suite
+├── docs/                   # Documentation
+└── examples/               # Example rules and scripts
+```
+
+### Running Tests
+
+```bash
+pytest tests/
+```
+
+### Code Quality
+
+```bash
+# Format code
+black src/
+
+# Sort imports
+isort src/
+
+# Type checking
+mypy src/
+
+# Linting
+flake8 src/
+```
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [SigmaHQ](https://github.com/SigmaHQ/sigma) for the Sigma rule format and rules
+- [MITRE](https://attack.mitre.org/) for the ATT&CK framework
+- [Atomic Red Team](https://github.com/redcanaryco/atomic-red-team) for atomic tests
+- [Qwen](https://github.com/QwenLM/Qwen) for the language model
+- [BGE](https://github.com/FlagOpen/FlagEmbedding) for embeddings
+- [ChromaDB](https://github.com/chroma-core/chroma) for vector database
+- [LangGraph](https://github.com/langchain-ai/langgraph) for workflow orchestration
+
+## 📞 Support
+
+- 📧 Email: support@canonical.dev
+- 💬 Discord: [Join our community](https://discord.gg/canonical)
+- 📖 Documentation: [docs.canonical.dev](https://docs.canonical.dev)
+- 🐛 Issues: [GitHub Issues](https://github.com/canonical/canonical/issues)
+
+## 🗺️ Roadmap
+
+- [ ] Support for more source formats (Yara, Suricata, etc.)
+- [ ] Additional target formats (Elasticsearch DSL, etc.)
+- [ ] Rule optimization and performance analysis
+- [ ] Web-based GUI for rule conversion
+- [ ] Integration with popular SIEM platforms
+- [ ] Rule testing and validation framework
+- [ ] Multi-language support for rule descriptions
+
+---
+
+**Canonical** - Making SIEM rule conversion intelligent and effortless! 🚀 
+
