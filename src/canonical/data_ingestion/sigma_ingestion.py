@@ -156,7 +156,11 @@ class SigmaIngestion:
                 # Create rule summary for embedding
                 rule_summary = sigma_parser.extract_rule_summary(parsed_rule)
                 
-                # Extract metadata
+                # Extract metadata - serialize complex types for ChromaDB compatibility
+                import json
+                logsource_info = sigma_parser.get_log_source_info(parsed_rule)
+                complexity_info = sigma_parser.analyze_rule_complexity(parsed_rule)
+                
                 metadata = {
                     "file_path": str(rule_file.relative_to(self.repo_path)),
                     "title": parsed_rule.title,
@@ -165,10 +169,13 @@ class SigmaIngestion:
                     "date": parsed_rule.date or "",
                     "level": parsed_rule.level or "",
                     "status": parsed_rule.status or "",
-                    "tags": parsed_rule.tags,
-                    "mitre_techniques": sigma_parser.extract_mitre_tags(parsed_rule),
-                    "logsource": parsed_rule.logsource,
-                    "complexity": sigma_parser.analyze_rule_complexity(parsed_rule),
+                    "tags": json.dumps(parsed_rule.tags),  # Serialize list to JSON string
+                    "mitre_techniques": json.dumps(sigma_parser.extract_mitre_tags(parsed_rule)),  # Serialize list to JSON string
+                    "logsource_category": logsource_info.get("category", ""),
+                    "logsource_product": logsource_info.get("product", ""),
+                    "logsource_service": logsource_info.get("service", ""),
+                    "complexity_level": complexity_info.get("complexity_level", "medium"),
+                    "complexity_score": float(complexity_info.get("complexity_score", 0)),
                     "rule_id": parsed_rule.id or "",
                     "type": "sigma_rule"
                 }

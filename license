@@ -1,0 +1,54 @@
+Canonical SIEM Rule Converter - Custom License
+
+Copyright (c) 2025 DIER
+
+Permission is hereby granted, free of charge, to any person or organization 
+obtaining a copy of this software and associated documentation files (the "Software"), 
+to use the Software internally within their organization, subject to the following 
+conditions and restrictions:
+
+PERMITTED USES:
+1. Internal use within Security Operations Centers (SOCs)
+2. Internal use within Managed Detection and Response (MDR) services
+3. Internal use within corporate cybersecurity teams
+4. Modification and customization for internal organizational use
+5. Integration with existing internal security infrastructure
+6. Educational and research purposes within academic institutions
+
+PROHIBITED USES:
+1. Commercial redistribution or resale of the Software
+2. Offering the Software as a commercial service or product
+3. Creating derivative works for commercial distribution
+4. Replication or hosting of the Software for external customers
+5. Incorporation into commercial security products or platforms
+6. Sublicensing or transferring rights to third parties
+
+RESTRICTIONS:
+- The Software may not be used to create competing commercial products
+- The Software may not be redistributed in any form without explicit written 
+  permission from Dier
+- Any modifications must retain this license and copyright notice
+- The Software may not be reverse engineered for commercial purposes
+- No warranty is provided, and Dier is not liable for any damages
+
+ATTRIBUTION:
+- All copies and derivative works must include this license
+- Credit must be given to DIER and the Canonical SIEM Rule Converter project
+- Any public mention or documentation must acknowledge the original source
+
+COMPLIANCE:
+Organizations using this Software must:
+- Use it solely for internal security operations
+- Not redistribute or share access with external parties
+- Maintain the confidentiality of any modifications or customizations
+- Respect the intellectual property rights of DIER
+
+For commercial licensing, partnership opportunities, or questions about permitted 
+uses, please contact: team@dierhq.com
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
+DIER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN 
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION 
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 

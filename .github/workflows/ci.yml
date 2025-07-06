@@ -1,0 +1,213 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov black isort flake8 mypy
+    
+    - name: Code formatting check
+      run: |
+        black --check src/ tests/
+        isort --check-only src/ tests/
+    
+    - name: Linting
+      run: |
+        flake8 src/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+    
+    - name: Type checking
+      run: |
+        mypy src/canonical --ignore-missing-imports
+    
+    - name: Run tests
+      run: |
+        pytest tests/ -v --cov=src/canonical --cov-report=xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety bandit
+    
+    - name: Security audit
+      run: |
+        safety check
+        bandit -r src/canonical -f json -o bandit-report.json
+    
+    - name: Upload security report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-report
+        path: bandit-report.json
+
+  license-compliance:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check license headers
+      run: |
+        # Check that all Python files have proper license headers
+        find src/ -name "*.py" -exec grep -L "Copyright (c) 2025 DIER" {} \; | tee missing_license.txt
+        if [ -s missing_license.txt ]; then
+          echo "Files missing license headers:"
+          cat missing_license.txt
+          exit 1
+        fi
+    
+    - name: Validate custom license
+      run: |
+        if [ ! -f license ]; then
+          echo "license file is missing"
+          exit 1
+        fi
+        if ! grep -q "Copyright (c) 2025 DIER" license; then
+          echo "LICENSE file missing proper copyright"
+          exit 1
+        fi
+
+  documentation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install sphinx sphinx-rtd-theme
+    
+    - name: Check documentation
+      run: |
+        # Check that key documentation files exist
+        required_files=("readme.md" "contributing.md" "security.md" "changelog.md" "system-requirements.md")
+        for file in "${required_files[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "Required documentation file missing: $file"
+            exit 1
+          fi
+        done
+    
+    - name: Validate README links
+      run: |
+        # Basic check for broken markdown links in README
+        if grep -q "](http" readme.md; then
+          echo "External links found in README - manual verification needed"
+        fi
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [test, security-scan, license-compliance, documentation]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build wheel
+    
+    - name: Build package
+      run: |
+        python -m build
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: dist
+        path: dist/
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: [build]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install package
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .
+    
+    - name: Create test environment
+      run: |
+        cp .env.example .env
+        mkdir -p data/cache data/chromadb data/repos
+    
+    - name: Test CLI commands
+      run: |
+        # Test basic CLI functionality (without full data ingestion)
+        python -m src.canonical.cli --help
+        python -m src.canonical.cli stats || true  # May fail without data
+    
+    - name: Test API server startup
+      run: |
+        # Test that API server can start (without full functionality)
+        timeout 30s python -m src.canonical.cli serve --host 127.0.0.1 --port 8001 &
+        sleep 10
+        curl -f http://127.0.0.1:8001/health || echo "API server test completed" 

@@ -37,6 +37,11 @@ class SigmaRule(BaseModel):
     falsepositives: List[str] = Field(default_factory=list)
     level: Optional[str] = None
     references: List[str] = Field(default_factory=list)
+    
+    # Computed properties
+    mitre_techniques: List[str] = Field(default_factory=list)
+    complexity: str = "medium"
+    is_valid: bool = True
 
 
 class ConversionRequest(BaseModel):
@@ -45,6 +50,7 @@ class ConversionRequest(BaseModel):
     source_format: SourceFormat = Field(..., description="Source rule format")
     target_format: TargetFormat = Field(..., description="Target rule format")
     context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context for conversion")
+    options: Optional[Dict[str, Any]] = Field(default=None, description="Conversion options")
 
 
 class ConversionResponse(BaseModel):

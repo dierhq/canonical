@@ -1,0 +1,55 @@
+"""
+Unified data ingestion script for all data sources.
+"""
+
+import asyncio
+from typing import Dict, Any
+from loguru import logger
+
+from .mitre_ingestion import mitre_ingestion
+from .car_ingestion import car_ingestion
+from .atomic_ingestion import atomic_ingestion
+
+
+async def ingest_all_data(force_refresh: bool = False) -> Dict[str, Any]:
+    """Ingest all data sources.
+    
+    Args:
+        force_refresh: Whether to force refresh all data
+        
+    Returns:
+        Combined ingestion statistics
+    """
+    logger.info("Starting unified data ingestion for all sources")
+    
+    results = {}
+    
+    try:
+        # Ingest MITRE ATT&CK data
+        logger.info("Starting MITRE ATT&CK ingestion...")
+        mitre_stats = await mitre_ingestion.ingest_mitre_data(force_refresh)
+        results["mitre_attack"] = mitre_stats
+        
+        # Ingest MITRE CAR data
+        logger.info("Starting MITRE CAR ingestion...")
+        car_stats = await car_ingestion.ingest_car_data(force_refresh)
+        results["mitre_car"] = car_stats
+        
+        # Ingest Atomic Red Team data
+        logger.info("Starting Atomic Red Team ingestion...")
+        atomic_stats = await atomic_ingestion.ingest_atomic_data(force_refresh)
+        results["atomic_red_team"] = atomic_stats
+        
+        logger.info("All data ingestion completed successfully")
+        logger.info(f"Final statistics: {results}")
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Unified data ingestion failed: {e}")
+        raise
+
+
+if __name__ == "__main__":
+    # Run the ingestion
+    asyncio.run(ingest_all_data(force_refresh=True)) 

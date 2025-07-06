@@ -5,7 +5,8 @@ Configuration management for the Canonical SIEM rule converter.
 import os
 from pathlib import Path
 from typing import Optional
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=32, env="EMBEDDING_BATCH_SIZE")
     
     # Qwen LLM settings
-    qwen_model: str = Field(default="Qwen/Qwen2.5-7B-Instruct", env="QWEN_MODEL")
+    qwen_model: str = Field(default="Qwen/Qwen2.5-3B-Instruct", env="QWEN_MODEL")
     qwen_device: str = Field(default="cpu", env="QWEN_DEVICE")
     qwen_max_tokens: int = Field(default=4096, env="QWEN_MAX_TOKENS")
     qwen_temperature: float = Field(default=0.1, env="QWEN_TEMPERATURE")
@@ -52,9 +53,9 @@ class Settings(BaseSettings):
         default="https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json",
         env="MITRE_ATTACK_URL"
     )
-    mitre_car_repo_url: str = Field(
+    car_repo_url: str = Field(
         default="https://github.com/mitre-attack/car.git",
-        env="MITRE_CAR_REPO_URL"
+        env="CAR_REPO_URL"
     )
     atomic_repo_url: str = Field(
         default="https://github.com/redcanaryco/atomic-red-team.git",
@@ -78,6 +79,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "allow"  # Allow extra fields from .env
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

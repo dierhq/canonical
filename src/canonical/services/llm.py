@@ -122,6 +122,7 @@ class QwenLLMService:
         
         try:
             response = await self.generate_response(prompt)
+            logger.debug(f"LLM raw response: {response}")
             return self._parse_conversion_response(response, target_format)
         except Exception as e:
             logger.error(f"Failed to convert Sigma rule: {e}")
@@ -235,42 +236,128 @@ Response:"""
             Parsed conversion result
         """
         try:
-            # Try to extract JSON from the response
-            start_idx = response.find('{')
-            end_idx = response.rfind('}') + 1
+            # Clean up the response - remove markdown code blocks and handle multiple JSON blocks
+            cleaned_response = response.strip()
             
-            if start_idx != -1 and end_idx != -1:
-                json_str = response[start_idx:end_idx]
-                result = json.loads(json_str)
+            # Remove markdown code blocks
+            import re
+            # Remove ```json and ``` markers
+            cleaned_response = re.sub(r'```json\s*', '', cleaned_response)
+            cleaned_response = re.sub(r'```\s*', '', cleaned_response)
+            
+            # Find all JSON objects in the response
+            json_objects = []
+            brace_count = 0
+            start_idx = -1
+            
+            for i, char in enumerate(cleaned_response):
+                if char == '{':
+                    if brace_count == 0:
+                        start_idx = i
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0 and start_idx != -1:
+                        json_objects.append(cleaned_response[start_idx:i+1])
+                        start_idx = -1
+            
+            # Try to parse each JSON object and use the first valid one
+            logger.debug(f"Found {len(json_objects)} JSON objects to parse")
+            for json_str in json_objects:
                 
-                # Validate required fields
-                if "target_rule" not in result:
-                    result["target_rule"] = None
-                if "confidence_score" not in result:
-                    result["confidence_score"] = 0.5
-                if "explanation" not in result:
-                    result["explanation"] = "No explanation provided"
-                
-                result["success"] = bool(result.get("target_rule"))
-                return result
-            else:
-                # Fallback: treat entire response as the converted rule
+                # Try to fix common JSON issues with multi-line strings
+                try:
+                    result = json.loads(json_str)
+                    
+                    # Validate and clean up required fields
+                    if "target_rule" in result and result["target_rule"]:
+                        # Unescape newlines in target_rule if needed
+                        if isinstance(result["target_rule"], str):
+                            result["target_rule"] = result["target_rule"].replace('\\n', '\n').replace('\\r', '\r')
+                    else:
+                        result["target_rule"] = None
+                        
+                    if "confidence_score" not in result:
+                        result["confidence_score"] = 0.5
+                    if "explanation" not in result:
+                        result["explanation"] = "No explanation provided"
+                    
+                    result["success"] = bool(result.get("target_rule"))
+                    return result
+                    
+                except json.JSONDecodeError:
+                    # Try to fix malformed JSON by escaping newlines in target_rule
+                    # Find target_rule value and escape newlines
+                    pattern = r'"target_rule":\s*"([^"]*(?:\n[^"]*)*)"'
+                    match = re.search(pattern, json_str, re.DOTALL)
+                    if match:
+                        original_rule = match.group(1)
+                        escaped_rule = original_rule.replace('\n', '\\n').replace('\r', '\\r')
+                        json_str = json_str.replace(match.group(0), f'"target_rule": "{escaped_rule}"')
+                        
+                        try:
+                            result = json.loads(json_str)
+                            # Unescape newlines in target_rule
+                            if "target_rule" in result and result["target_rule"]:
+                                result["target_rule"] = result["target_rule"].replace('\\n', '\n').replace('\\r', '\r')
+                            else:
+                                result["target_rule"] = None
+                                
+                            if "confidence_score" not in result:
+                                result["confidence_score"] = 0.5
+                            if "explanation" not in result:
+                                result["explanation"] = "No explanation provided"
+                            
+                            result["success"] = bool(result.get("target_rule"))
+                            return result
+                        except json.JSONDecodeError:
+                            continue  # Try next JSON object
+                    else:
+                        continue  # Try next JSON object
+            
+            # If no valid JSON objects found, fallback to extracting rule from response
+            # Fallback: treat entire response as the converted rule
+            return {
+                "success": True,
+                "target_rule": cleaned_response,
+                "confidence_score": 0.3,
+                "explanation": "Rule extracted from unstructured response",
+                "field_mappings": {},
+                "notes": "Response format was not structured"
+            }
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Failed to parse JSON response: {e}")
+            # Try to extract just the rule part from the response
+            lines = response.split('\n')
+            rule_lines = []
+            in_rule = False
+            
+            for line in lines:
+                if 'SecurityEvent' in line or 'index=' in line or 'process where' in line or 'SELECT' in line:
+                    in_rule = True
+                if in_rule:
+                    rule_lines.append(line.strip())
+                    if line.strip().endswith('"') or line.strip().endswith(','):
+                        break
+            
+            if rule_lines:
+                extracted_rule = '\n'.join(rule_lines).strip(' ",')
                 return {
                     "success": True,
-                    "target_rule": response,
-                    "confidence_score": 0.3,
-                    "explanation": "Rule extracted from unstructured response",
+                    "target_rule": extracted_rule,
+                    "confidence_score": 0.4,
+                    "explanation": "Rule extracted from malformed response",
                     "field_mappings": {},
-                    "notes": "Response format was not structured"
+                    "notes": "Response format was malformed but rule was extracted"
                 }
-        except json.JSONDecodeError:
-            # Fallback for malformed JSON
+            
+            # Final fallback
             return {
                 "success": False,
                 "target_rule": None,
                 "confidence_score": 0.0,
                 "explanation": "Failed to parse LLM response",
-                "error_message": "Invalid JSON response format"
+                "error_message": f"Invalid response format: {str(e)}"
             }
     
     async def explain_rule(self, rule: str, rule_format: str) -> str:

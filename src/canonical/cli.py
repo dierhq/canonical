@@ -13,6 +13,10 @@ from .core.config import settings
 from .core.models import SourceFormat, TargetFormat
 from .core.converter import rule_converter
 from .data_ingestion.sigma_ingestion import sigma_ingestion
+from .data_ingestion.mitre_ingestion import mitre_ingestion
+from .data_ingestion.car_ingestion import car_ingestion
+from .data_ingestion.atomic_ingestion import atomic_ingestion
+from .data_ingestion.all_ingestion import ingest_all_data
 
 
 @click.group()
@@ -253,6 +257,122 @@ def ingest_sigma(force_refresh: bool):
             click.echo(f"  Total files: {stats['total_files']}")
             click.echo(f"  Successful: {stats['successful']}")
             click.echo(f"  Failed: {stats['failed']}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of data')
+def ingest_mitre(force_refresh: bool):
+    """Ingest MITRE ATT&CK framework data."""
+    async def _ingest():
+        try:
+            click.echo("Starting MITRE ATT&CK ingestion...")
+            
+            stats = await mitre_ingestion.ingest_mitre_data(force_refresh=force_refresh)
+            
+            click.echo(f"✅ Ingestion completed:")
+            click.echo(f"  Techniques: {stats['techniques']}")
+            click.echo(f"  Tactics: {stats['tactics']}")
+            click.echo(f"  Groups: {stats['groups']}")
+            click.echo(f"  Software: {stats['software']}")
+            click.echo(f"  Mitigations: {stats['mitigations']}")
+            click.echo(f"  Total processed: {stats['total_processed']}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of repository')
+def ingest_car(force_refresh: bool):
+    """Ingest MITRE CAR analytics data."""
+    async def _ingest():
+        try:
+            click.echo("Starting MITRE CAR ingestion...")
+            
+            stats = await car_ingestion.ingest_car_data(force_refresh=force_refresh)
+            
+            click.echo(f"✅ Ingestion completed:")
+            click.echo(f"  Analytics: {stats['analytics']}")
+            click.echo(f"  Successful: {stats['successful']}")
+            click.echo(f"  Failed: {stats['failed']}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of repository')
+def ingest_atomic(force_refresh: bool):
+    """Ingest Atomic Red Team tests data."""
+    async def _ingest():
+        try:
+            click.echo("Starting Atomic Red Team ingestion...")
+            
+            stats = await atomic_ingestion.ingest_atomic_data(force_refresh=force_refresh)
+            
+            click.echo(f"✅ Ingestion completed:")
+            click.echo(f"  Techniques: {stats['techniques']}")
+            click.echo(f"  Tests: {stats['tests']}")
+            click.echo(f"  Successful: {stats['successful']}")
+            click.echo(f"  Failed: {stats['failed']}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of all data')
+def ingest_all(force_refresh: bool):
+    """Ingest all data sources (MITRE ATT&CK, CAR, Atomic Red Team)."""
+    async def _ingest():
+        try:
+            click.echo("Starting ingestion of all data sources...")
+            
+            stats = await ingest_all_data(force_refresh=force_refresh)
+            
+            click.echo(f"✅ All ingestion completed:")
+            
+            # Display MITRE ATT&CK stats
+            if "mitre_attack" in stats:
+                mitre_stats = stats["mitre_attack"]
+                click.echo(f"\n  MITRE ATT&CK:")
+                click.echo(f"    Techniques: {mitre_stats['techniques']}")
+                click.echo(f"    Tactics: {mitre_stats['tactics']}")
+                click.echo(f"    Groups: {mitre_stats['groups']}")
+                click.echo(f"    Software: {mitre_stats['software']}")
+                click.echo(f"    Mitigations: {mitre_stats['mitigations']}")
+            
+            # Display CAR stats
+            if "mitre_car" in stats:
+                car_stats = stats["mitre_car"]
+                click.echo(f"\n  MITRE CAR:")
+                click.echo(f"    Analytics: {car_stats['analytics']}")
+                click.echo(f"    Successful: {car_stats['successful']}")
+                click.echo(f"    Failed: {car_stats['failed']}")
+            
+            # Display Atomic Red Team stats
+            if "atomic_red_team" in stats:
+                atomic_stats = stats["atomic_red_team"]
+                click.echo(f"\n  Atomic Red Team:")
+                click.echo(f"    Techniques: {atomic_stats['techniques']}")
+                click.echo(f"    Tests: {atomic_stats['tests']}")
+                click.echo(f"    Successful: {atomic_stats['successful']}")
+                click.echo(f"    Failed: {atomic_stats['failed']}")
             
         except Exception as e:
             click.echo(f"❌ Ingestion failed: {e}")
