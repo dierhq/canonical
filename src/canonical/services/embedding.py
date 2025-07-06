@@ -1,4 +1,14 @@
 """
+Copyright (c) 2025 DIER
+
+This software is proprietary and confidential. Unauthorized copying, distribution, 
+or use of this software is strictly prohibited. This software is provided for 
+internal use only within organizations for cybersecurity purposes.
+
+For licensing inquiries, contact: licensing@dier.org
+"""
+
+"""
 BGE embedding service for text vectorization.
 """
 
