@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     mitre_collection: str = Field(default="mitre_attack", env="MITRE_COLLECTION")
     car_collection: str = Field(default="mitre_car", env="CAR_COLLECTION")
     atomic_collection: str = Field(default="atomic_red_team", env="ATOMIC_COLLECTION")
+    azure_sentinel_detections_collection: str = Field(default="azure_sentinel_detections", env="AZURE_SENTINEL_DETECTIONS_COLLECTION")
+    azure_sentinel_hunting_collection: str = Field(default="azure_sentinel_hunting", env="AZURE_SENTINEL_HUNTING_COLLECTION")
+    qradar_collection: str = Field(default="qradar_rules", env="QRADAR_COLLECTION")
     
     # Embedding model settings
     embedding_model: str = Field(default="BAAI/bge-large-en-v1.5", env="EMBEDDING_MODEL")
@@ -70,6 +73,10 @@ class Settings(BaseSettings):
     atomic_repo_url: str = Field(
         default="https://github.com/redcanaryco/atomic-red-team.git",
         env="ATOMIC_REPO_URL"
+    )
+    azure_sentinel_repo_url: str = Field(
+        default="https://github.com/Azure/Azure-Sentinel.git",
+        env="AZURE_SENTINEL_REPO_URL"
     )
     
     # Data directories

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 class SourceFormat(str, Enum):
     """Supported source rule formats."""
     SIGMA = "sigma"
+    QRADAR = "qradar"
 
 
 class TargetFormat(str, Enum):
@@ -126,4 +127,89 @@ class CARAnalytic(BaseModel):
     mitre_techniques: List[str]
     data_model: List[str]
     implementations: List[Dict[str, Any]] = Field(default_factory=list)
-    unit_tests: List[Dict[str, Any]] = Field(default_factory=list) 
+    unit_tests: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class QRadarRule(BaseModel):
+    """QRadar rule structure."""
+    rule_id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    rule_type: str  # "EVENT", "FLOW", "OFFENSE", "COMMON"
+    enabled: bool = True
+    tests: List[Dict[str, Any]] = Field(default_factory=list)
+    actions: List[Dict[str, Any]] = Field(default_factory=list)
+    responses: List[Dict[str, Any]] = Field(default_factory=list)
+    groups: List[str] = Field(default_factory=list)
+    severity: Optional[int] = None
+    credibility: Optional[int] = None
+    relevance: Optional[int] = None
+    category: Optional[str] = None
+    origin: Optional[str] = None
+    username: Optional[str] = None
+    creation_date: Optional[str] = None
+    modification_date: Optional[str] = None
+    
+    # Extracted metadata
+    mitre_techniques: List[str] = Field(default_factory=list)
+    complexity: str = "medium"
+    is_valid: bool = True
+
+
+class AzureSentinelDetection(BaseModel):
+    """Azure Sentinel detection rule structure."""
+    rule_id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    severity: str  # "Low", "Medium", "High", "Critical"
+    query: str
+    query_frequency: Optional[str] = None
+    query_period: Optional[str] = None
+    trigger_operator: Optional[str] = None
+    trigger_threshold: Optional[int] = None
+    tactics: List[str] = Field(default_factory=list)
+    techniques: List[str] = Field(default_factory=list)
+    display_name: Optional[str] = None
+    enabled: bool = True
+    suppression_enabled: bool = False
+    suppression_duration: Optional[str] = None
+    event_grouping: Optional[Dict[str, Any]] = None
+    alert_details_override: Optional[Dict[str, Any]] = None
+    custom_details: Optional[Dict[str, Any]] = None
+    entity_mappings: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    # Metadata
+    author: Optional[str] = None
+    created_date: Optional[str] = None
+    last_modified: Optional[str] = None
+    version: Optional[str] = None
+    source: str = "Azure Sentinel"
+    
+    # Extracted metadata
+    mitre_techniques: List[str] = Field(default_factory=list)
+    complexity: str = "medium"
+    is_valid: bool = True
+
+
+class AzureSentinelHuntingQuery(BaseModel):
+    """Azure Sentinel hunting query structure."""
+    query_id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    query: str
+    data_types: List[str] = Field(default_factory=list)
+    tactics: List[str] = Field(default_factory=list)
+    techniques: List[str] = Field(default_factory=list)
+    required_data_connectors: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    # Metadata
+    author: Optional[str] = None
+    created_date: Optional[str] = None
+    last_modified: Optional[str] = None
+    version: Optional[str] = None
+    source: str = "Azure Sentinel"
+    
+    # Extracted metadata
+    mitre_techniques: List[str] = Field(default_factory=list)
+    complexity: str = "medium"
+    is_valid: bool = True 

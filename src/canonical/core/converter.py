@@ -167,6 +167,21 @@ class RuleConverter:
             target_format=TargetFormat.SPL
         )
     
+    async def convert_qradar_to_kustoql(self, qradar_rule: str) -> ConversionResponse:
+        """Convert QRadar rule to KustoQL.
+        
+        Args:
+            qradar_rule: QRadar rule content
+            
+        Returns:
+            Conversion response
+        """
+        return await self.convert_rule(
+            source_rule=qradar_rule,
+            source_format=SourceFormat.QRADAR,
+            target_format=TargetFormat.KUSTOQL
+        )
+    
     async def batch_convert(
         self,
         rules: List[Dict[str, Any]],
@@ -264,6 +279,25 @@ class RuleConverter:
                     "complexity": complexity,
                     "mitre_techniques": mitre_techniques,
                     "title": parsed_rule.title,
+                    "description": parsed_rule.description
+                }
+            elif source_format == SourceFormat.QRADAR:
+                from ..parsers.qradar import qradar_parser
+                
+                # Parse and validate the rule
+                parsed_rule = qradar_parser.parse_rule(rule_content)
+                is_valid, errors = qradar_parser.validate_rule(parsed_rule)
+                
+                # Get rule analysis
+                complexity = parsed_rule.complexity
+                mitre_techniques = parsed_rule.mitre_techniques
+                
+                return {
+                    "valid": is_valid,
+                    "errors": errors,
+                    "complexity": complexity,
+                    "mitre_techniques": mitre_techniques,
+                    "title": parsed_rule.name,
                     "description": parsed_rule.description
                 }
             else:

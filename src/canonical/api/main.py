@@ -224,6 +224,26 @@ async def convert_sigma_to_spl(request: Dict[str, Any]):
         )
 
 
+@app.post("/convert/qradar/kustoql", response_model=ConversionResponse)
+async def convert_qradar_to_kustoql(request: Dict[str, Any]):
+    """Convert QRadar rule to KustoQL (Azure Sentinel)."""
+    try:
+        qradar_rule = request.get("rule")
+        if not qradar_rule:
+            raise HTTPException(status_code=400, detail="Missing 'rule' field")
+        
+        response = await rule_converter.convert_qradar_to_kustoql(qradar_rule)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"QRadar to KustoQL conversion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion failed: {str(e)}"
+        )
+
+
 @app.post("/convert/batch")
 async def batch_convert_rules(request: Dict[str, Any]):
     """Convert multiple rules in batch."""
@@ -377,6 +397,95 @@ async def search_collection(collection_name: str, request: Dict[str, Any]):
         raise HTTPException(
             status_code=500,
             detail=f"Collection search failed: {str(e)}"
+        )
+
+
+@app.post("/ingest/azure-sentinel")
+async def ingest_azure_sentinel(request: Dict[str, Any]):
+    """Ingest Azure Sentinel detection rules and hunting queries."""
+    try:
+        from ..data_ingestion.azure_sentinel_ingestion import azure_sentinel_ingestion
+        
+        force_refresh = request.get("force_refresh", False)
+        
+        stats = await azure_sentinel_ingestion.ingest_all(force_refresh=force_refresh)
+        return stats
+    except Exception as e:
+        logger.error(f"Azure Sentinel ingestion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Azure Sentinel ingestion failed: {str(e)}"
+        )
+
+
+@app.post("/ingest/qradar/directory")
+async def ingest_qradar_directory(request: Dict[str, Any]):
+    """Ingest QRadar rules from a directory."""
+    try:
+        from ..data_ingestion.qradar_ingestion import qradar_ingestion
+        
+        directory_path = request.get("directory_path")
+        force_refresh = request.get("force_refresh", False)
+        
+        if not directory_path:
+            raise HTTPException(status_code=400, detail="Missing 'directory_path' field")
+        
+        stats = await qradar_ingestion.ingest_from_directory(
+            directory_path=directory_path,
+            force_refresh=force_refresh
+        )
+        return stats
+    except Exception as e:
+        logger.error(f"QRadar directory ingestion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"QRadar directory ingestion failed: {str(e)}"
+        )
+
+
+@app.post("/ingest/qradar/file")
+async def ingest_qradar_file(request: Dict[str, Any]):
+    """Ingest QRadar rules from a file."""
+    try:
+        from ..data_ingestion.qradar_ingestion import qradar_ingestion
+        
+        file_path = request.get("file_path")
+        
+        if not file_path:
+            raise HTTPException(status_code=400, detail="Missing 'file_path' field")
+        
+        stats = await qradar_ingestion.ingest_from_file(file_path=file_path)
+        return stats
+    except Exception as e:
+        logger.error(f"QRadar file ingestion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"QRadar file ingestion failed: {str(e)}"
+        )
+
+
+@app.post("/ingest/qradar/text")
+async def ingest_qradar_text(request: Dict[str, Any]):
+    """Ingest a QRadar rule from text content."""
+    try:
+        from ..data_ingestion.qradar_ingestion import qradar_ingestion
+        
+        rule_content = request.get("rule_content")
+        rule_name = request.get("rule_name", "Manual Rule")
+        
+        if not rule_content:
+            raise HTTPException(status_code=400, detail="Missing 'rule_content' field")
+        
+        stats = await qradar_ingestion.ingest_from_text(
+            rule_content=rule_content,
+            rule_name=rule_name
+        )
+        return stats
+    except Exception as e:
+        logger.error(f"QRadar text ingestion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"QRadar text ingestion failed: {str(e)}"
         )
 
 

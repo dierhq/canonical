@@ -78,6 +78,18 @@ class ChromaDBService:
             {
                 "name": settings.atomic_collection,
                 "description": "Atomic Red Team tests"
+            },
+            {
+                "name": settings.azure_sentinel_detections_collection,
+                "description": "Azure Sentinel detection rules"
+            },
+            {
+                "name": settings.azure_sentinel_hunting_collection,
+                "description": "Azure Sentinel hunting queries"
+            },
+            {
+                "name": settings.qradar_collection,
+                "description": "QRadar rules and correlation rules"
             }
         ]
         
@@ -337,6 +349,54 @@ class ChromaDBService:
         """
         return await self.search_similar(
             collection_name=settings.car_collection,
+            query=query,
+            n_results=n_results
+        )
+    
+    async def find_azure_sentinel_detections(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+        """Find Azure Sentinel detection rules related to a query.
+        
+        Args:
+            query: Query text
+            n_results: Number of results to return
+            
+        Returns:
+            List of related Azure Sentinel detection rules
+        """
+        return await self.search_similar(
+            collection_name=settings.azure_sentinel_detections_collection,
+            query=query,
+            n_results=n_results
+        )
+    
+    async def find_azure_sentinel_hunting_queries(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+        """Find Azure Sentinel hunting queries related to a query.
+        
+        Args:
+            query: Query text
+            n_results: Number of results to return
+            
+        Returns:
+            List of related Azure Sentinel hunting queries
+        """
+        return await self.search_similar(
+            collection_name=settings.azure_sentinel_hunting_collection,
+            query=query,
+            n_results=n_results
+        )
+    
+    async def find_qradar_rules(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+        """Find QRadar rules related to a query.
+        
+        Args:
+            query: Query text
+            n_results: Number of results to return
+            
+        Returns:
+            List of related QRadar rules
+        """
+        return await self.search_similar(
+            collection_name=settings.qradar_collection,
             query=query,
             n_results=n_results
         )

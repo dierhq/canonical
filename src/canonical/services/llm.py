@@ -370,6 +370,139 @@ Response:"""
                 "error_message": f"Invalid response format: {str(e)}"
             }
     
+    async def convert_qradar_to_kustoql(
+        self, 
+        qradar_rule: str, 
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Convert a QRadar rule to KustoQL.
+        
+        Args:
+            qradar_rule: QRadar rule content
+            context: Additional context for conversion including Azure Sentinel examples
+            
+        Returns:
+            Conversion result with KustoQL rule, confidence, and explanation
+        """
+        prompt = self._build_qradar_to_kustoql_prompt(qradar_rule, context)
+        
+        try:
+            response = await self.generate_response(prompt)
+            logger.debug(f"QRadar to KustoQL LLM response: {response}")
+            return self._parse_conversion_response(response, TargetFormat.KUSTOQL)
+        except Exception as e:
+            logger.error(f"Failed to convert QRadar rule to KustoQL: {e}")
+            return {
+                "success": False,
+                "target_rule": None,
+                "confidence_score": 0.0,
+                "explanation": f"QRadar to KustoQL conversion failed: {str(e)}",
+                "error_message": str(e)
+            }
+    
+    def _build_qradar_to_kustoql_prompt(
+        self, 
+        qradar_rule: str, 
+        context: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Build the QRadar to KustoQL conversion prompt.
+        
+        Args:
+            qradar_rule: QRadar rule content
+            context: Additional context including Azure Sentinel examples
+            
+        Returns:
+            Formatted prompt
+        """
+        context_info = ""
+        azure_examples = ""
+        
+        if context:
+            if "mitre_techniques" in context:
+                context_info += f"\nMITRE ATT&CK Techniques: {', '.join(context['mitre_techniques'])}"
+            
+            if "similar_rules" in context:
+                context_info += f"\nSimilar rules found: {len(context['similar_rules'])}"
+            
+            if "azure_sentinel_examples" in context:
+                azure_examples = "\n\nRelevant Azure Sentinel Examples:\n"
+                for i, example in enumerate(context["azure_sentinel_examples"][:3]):  # Limit to 3 examples
+                    azure_examples += f"\nExample {i+1}:\n{example.get('query', '')}\n"
+        
+        prompt = f"""You are an expert SIEM rule converter specializing in converting QRadar correlation rules to KustoQL (Azure Sentinel).
+
+QRadar Rule to Convert:
+```
+{qradar_rule}
+```
+
+{context_info}
+{azure_examples}
+
+QRadar to KustoQL Field Mappings:
+- sourceip → SourceIP, SrcIP, or ClientIP
+- destinationip → DestinationIP, DstIP, or DestIP  
+- username → AccountName, UserName, or Account
+- qid → EventID (map to Windows Event IDs when possible)
+- category → EventCategory or Category
+- payload → EventData or CommandLine
+- hostname → Computer or DeviceName
+- processname → ProcessName or NewProcessName
+- filename → FileName or TargetFilename
+- url → Url or RequestURL
+- domainname → Domain or TargetDomainName
+
+QRadar Operators to KustoQL:
+- = → ==
+- != → !=
+- ilike → contains (case-insensitive)
+- not ilike → !contains
+- in → in~
+- not in → !in~
+- matches → matches regex
+- > → >
+- < → <
+
+QRadar Time Windows to KustoQL:
+- "last X minutes" → "ago(Xm)"
+- "last X hours" → "ago(Xh)"  
+- "last X days" → "ago(Xd)"
+
+KustoQL Table Selection Guidelines:
+- Windows Events: SecurityEvent, Event, WindowsEvent
+- Network Events: CommonSecurityLog, NetworkCommunicationEvents
+- DNS Events: DnsEvents
+- Process Events: SecurityEvent (EventID 4688), ProcessCreationEvents
+- Logon Events: SecurityEvent (EventID 4624, 4625), SigninLogs
+- File Events: DeviceFileEvents, SecurityEvent
+- Web/Proxy: CommonSecurityLog, W3CIISLog
+
+Instructions:
+1. Analyze the QRadar rule structure and detection logic
+2. Map QRadar fields to appropriate KustoQL table fields
+3. Convert QRadar operators to KustoQL operators
+4. Handle time windows and aggregations appropriately
+5. Select the most appropriate KustoQL table(s)
+6. Maintain the detection logic and intent
+7. Use proper KustoQL syntax and functions
+8. Provide a confidence score (0.0-1.0)
+9. Explain the conversion process and any assumptions made
+
+Respond in the following JSON format:
+{{
+    "success": true,
+    "target_rule": "// Converted from QRadar rule\\n// Original rule logic: [brief description]\\n\\nTableName\\n| where TimeGenerated > ago(1h)\\n| where Field == \\"value\\"\\n| project TimeGenerated, Field1, Field2\\n| summarize count() by Field1",
+    "confidence_score": 0.85,
+    "explanation": "Detailed explanation of the conversion process, field mappings, and any assumptions made",
+    "field_mappings": {{"qradar_field": "kustoql_field"}},
+    "table_used": "SecurityEvent",
+    "notes": "Any important notes, limitations, or manual adjustments needed"
+}}
+
+Response:"""
+        
+        return prompt
+    
     async def explain_rule(self, rule: str, rule_format: str) -> str:
         """Explain what a rule does in natural language.
         

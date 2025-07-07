@@ -84,6 +84,12 @@ class ConversionWorkflow:
                 parsed_rule = sigma_parser.parse_rule(request.source_rule)
                 state["parsed_rule"] = sigma_parser.convert_to_dict(parsed_rule)
                 logger.info(f"Successfully parsed Sigma rule: {parsed_rule.title}")
+            elif request.source_format.value == "qradar":
+                # Parse QRadar rule
+                from ..parsers.qradar import qradar_parser
+                parsed_rule = qradar_parser.parse_rule(request.source_rule)
+                state["parsed_rule"] = qradar_parser.convert_to_dict(parsed_rule)
+                logger.info(f"Successfully parsed QRadar rule: {parsed_rule.name}")
             else:
                 raise ValueError(f"Unsupported source format: {request.source_format}")
             
@@ -105,9 +111,16 @@ class ConversionWorkflow:
             if not parsed_rule:
                 return state
             
-            # Create SigmaRule object for extraction
-            rule_obj = sigma_parser.parse_rule(state["request"].source_rule)
-            mitre_techniques = sigma_parser.extract_mitre_tags(rule_obj)
+            request = state["request"]
+            mitre_techniques = []
+            
+            if request.source_format.value == "sigma":
+                # Create SigmaRule object for extraction
+                rule_obj = sigma_parser.parse_rule(request.source_rule)
+                mitre_techniques = sigma_parser.extract_mitre_tags(rule_obj)
+            elif request.source_format.value == "qradar":
+                # Extract from parsed QRadar rule
+                mitre_techniques = parsed_rule.get("mitre_techniques", [])
             
             state["mitre_techniques"] = mitre_techniques
             logger.info(f"Extracted {len(mitre_techniques)} MITRE techniques")
@@ -130,15 +143,31 @@ class ConversionWorkflow:
             if not parsed_rule:
                 return state
             
-            # Create rule summary for similarity search
-            rule_obj = sigma_parser.parse_rule(state["request"].source_rule)
-            rule_summary = sigma_parser.extract_rule_summary(rule_obj)
+            request = state["request"]
+            rule_summary = ""
+            similar_rules = []
             
-            # Search for similar rules
-            similar_rules = await chromadb_service.find_similar_sigma_rules(
-                query=rule_summary,
-                n_results=5
-            )
+            if request.source_format.value == "sigma":
+                # Create rule summary for similarity search
+                rule_obj = sigma_parser.parse_rule(request.source_rule)
+                rule_summary = sigma_parser.extract_rule_summary(rule_obj)
+                
+                # Search for similar Sigma rules
+                similar_rules = await chromadb_service.find_similar_sigma_rules(
+                    query=rule_summary,
+                    n_results=5
+                )
+            elif request.source_format.value == "qradar":
+                # Create rule summary for QRadar rule
+                from ..parsers.qradar import qradar_parser
+                rule_obj = qradar_parser.parse_rule(request.source_rule)
+                rule_summary = qradar_parser.extract_rule_summary(rule_obj)
+                
+                # Search for similar QRadar rules
+                similar_rules = await chromadb_service.find_qradar_rules(
+                    query=rule_summary,
+                    n_results=5
+                )
             
             state["similar_rules"] = similar_rules
             logger.info(f"Found {len(similar_rules)} similar rules")
@@ -160,6 +189,7 @@ class ConversionWorkflow:
             
             context_data = {}
             mitre_techniques = state.get("mitre_techniques", [])
+            request = state["request"]
             
             # Gather MITRE technique details
             if mitre_techniques:
@@ -186,15 +216,40 @@ class ConversionWorkflow:
                 
                 context_data["atomic_tests"] = atomic_tests
             
-            # Gather CAR analytics
-            rule_obj = sigma_parser.parse_rule(state["request"].source_rule)
-            rule_summary = sigma_parser.extract_rule_summary(rule_obj)
+            # Gather CAR analytics and create rule summary
+            if request.source_format.value == "sigma":
+                rule_obj = sigma_parser.parse_rule(request.source_rule)
+                rule_summary = sigma_parser.extract_rule_summary(rule_obj)
+            elif request.source_format.value == "qradar":
+                from ..parsers.qradar import qradar_parser
+                rule_obj = qradar_parser.parse_rule(request.source_rule)
+                rule_summary = qradar_parser.extract_rule_summary(rule_obj)
+            else:
+                rule_summary = "Unknown rule format"
             
             car_analytics = await chromadb_service.find_car_analytics(
                 query=rule_summary,
                 n_results=3
             )
             context_data["car_analytics"] = car_analytics
+            
+            # For QRadar to KustoQL conversion, gather Azure Sentinel examples
+            if (request.source_format.value == "qradar" and 
+                request.target_format.value == "kustoql"):
+                
+                # Search for relevant Azure Sentinel detection rules
+                azure_detections = await chromadb_service.find_azure_sentinel_detections(
+                    query=rule_summary,
+                    n_results=3
+                )
+                context_data["azure_sentinel_examples"] = azure_detections
+                
+                # Also search for hunting queries
+                azure_hunting = await chromadb_service.find_azure_sentinel_hunting_queries(
+                    query=rule_summary,
+                    n_results=2
+                )
+                context_data["azure_hunting_examples"] = azure_hunting
             
             state["context_data"] = context_data
             logger.info("Context data gathered successfully")
@@ -223,12 +278,28 @@ class ConversionWorkflow:
                 "context_data": state.get("context_data", {})
             }
             
-            # Convert rule using LLM
-            conversion_result = await llm_service.convert_sigma_rule(
-                sigma_rule=request.source_rule,
-                target_format=request.target_format,
-                context=context
-            )
+            # Add Azure Sentinel examples for QRadar to KustoQL conversion
+            if (request.source_format.value == "qradar" and 
+                request.target_format.value == "kustoql"):
+                context_data = state.get("context_data", {})
+                context["azure_sentinel_examples"] = context_data.get("azure_sentinel_examples", [])
+                context["azure_hunting_examples"] = context_data.get("azure_hunting_examples", [])
+            
+            # Convert rule using appropriate LLM method
+            if (request.source_format.value == "qradar" and 
+                request.target_format.value == "kustoql"):
+                # Use specialized QRadar to KustoQL conversion
+                conversion_result = await llm_service.convert_qradar_to_kustoql(
+                    qradar_rule=request.source_rule,
+                    context=context
+                )
+            else:
+                # Use general Sigma conversion
+                conversion_result = await llm_service.convert_sigma_rule(
+                    sigma_rule=request.source_rule,
+                    target_format=request.target_format,
+                    context=context
+                )
             
             state["conversion_result"] = conversion_result
             logger.info("Rule conversion completed")

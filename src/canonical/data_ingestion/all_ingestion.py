@@ -19,6 +19,7 @@ from loguru import logger
 from .mitre_ingestion import mitre_ingestion
 from .car_ingestion import car_ingestion
 from .atomic_ingestion import atomic_ingestion
+from .azure_sentinel_ingestion import azure_sentinel_ingestion
 
 
 async def ingest_all_data(force_refresh: bool = False) -> Dict[str, Any]:
@@ -49,6 +50,11 @@ async def ingest_all_data(force_refresh: bool = False) -> Dict[str, Any]:
         logger.info("Starting Atomic Red Team ingestion...")
         atomic_stats = await atomic_ingestion.ingest_atomic_data(force_refresh)
         results["atomic_red_team"] = atomic_stats
+        
+        # Ingest Azure Sentinel data
+        logger.info("Starting Azure Sentinel ingestion...")
+        azure_stats = await azure_sentinel_ingestion.ingest_all(force_refresh)
+        results["azure_sentinel"] = azure_stats
         
         logger.info("All data ingestion completed successfully")
         logger.info(f"Final statistics: {results}")
