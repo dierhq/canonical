@@ -5,9 +5,9 @@
 ![Canonical Logo](https://img.shields.io/badge/DIER-Canonical-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-Custom-red?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.9+-green?style=for-the-badge)
-![AI Powered](https://img.shields.io/badge/AI-Powered-purple?style=for-the-badge)
+![Local LLM](https://img.shields.io/badge/Local-LLM-purple?style=for-the-badge)
 
-**An intelligent SIEM rule converter that transforms security detection rules between different formats using AI and contextual intelligence.**
+**An intelligent SIEM rule converter that transforms security detection rules between different formats using local LLM and contextual intelligence.**
 
 [Features](#-features) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [License](#-license)
 
@@ -17,7 +17,7 @@
 
 ## 🎯 Overview
 
-Canonical is an advanced SIEM rule converter designed specifically for **Security Operations Centers (SOCs)**, **Managed Detection and Response (MDR)** services, and **enterprise cybersecurity teams**. It leverages cutting-edge AI techniques to provide context-aware, intelligent rule conversions with high accuracy and comprehensive security intelligence.
+Canonical is an advanced SIEM rule converter designed specifically for **Security Operations Centers (SOCs)**, **Managed Detection and Response (MDR)** services, and **enterprise cybersecurity teams**. It leverages local LLM processing and on-premises intelligence to provide context-aware, intelligent rule conversions with high accuracy and comprehensive security intelligence - perfect for air-gapped and secure environments.
 
 ### 🏢 Target Audience
 - **Security Operations Centers (SOCs)**
@@ -25,6 +25,7 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 - **Corporate cybersecurity teams**
 - **Security researchers and analysts**
 - **Educational institutions (cybersecurity programs)**
+- **Organizations migrating from QRadar to Azure Sentinel**
 
 ## ✨ Features
 
@@ -34,18 +35,37 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 - **Sigma** → **EQL** (Event Query Language)
 - **Sigma** → **Splunk SPL** (Splunk Enterprise Security)
 - **Sigma** → **QRadar AQL** (IBM QRadar)
+- **QRadar** → **KustoQL** (Azure Sentinel) - **🆕 NEW**
 
-### 🧠 **AI-Powered Intelligence**
-- **Context-Aware Conversions**: Uses vector similarity search across 6,891+ security rules
+**Total**: **6 conversion paths** across **2 source formats** and **5 target formats**
+
+### 🧠 **Local LLM Intelligence**
+- **On-Premises Processing**: Local Qwen2.5-3B-Instruct LLM with no external API calls
+- **Context-Aware Conversions**: Uses vector similarity search across 10,000+ security rules
 - **MITRE ATT&CK Integration**: Automatic technique mapping and enrichment
-- **Confidence Scoring**: AI-generated confidence levels for each conversion
+- **Confidence Scoring**: LLM-generated confidence levels for each conversion
 - **Semantic Understanding**: Advanced language models for accurate translations
+- **Air-Gapped Compatible**: Fully self-contained with local embeddings (BGE-large-en-v1.5)
 
 ### 📊 **Comprehensive Knowledge Base**
 - **3,015 Sigma Rules** from SigmaHQ repository
+- **3,000+ Azure Sentinel Detection Rules** from Microsoft's GitHub repository
+- **500+ Azure Sentinel Hunting Queries** for threat hunting context
 - **2,044 MITRE ATT&CK** techniques, tactics, groups, and mitigations
 - **102 MITRE CAR** analytics for additional detection context
 - **1,730 Atomic Red Team** tests for validation procedures
+- **QRadar Rules Collection** for similarity analysis and context enhancement
+
+**Total**: **10,000+ documents** for context-aware conversions
+
+### 🔄 **QRadar Migration Support**
+- **Comprehensive QRadar Parser**: Supports EVENT, FLOW, OFFENSE, and COMMON rule types
+- **Advanced Field Mapping**: Intelligent QRadar → KustoQL field translation
+- **Operator Conversion**: QRadar operators → KustoQL equivalents (=, ilike, matches, etc.)
+- **Time Window Translation**: QRadar time expressions → KustoQL `ago()` syntax
+- **Context Enhancement**: Uses Azure Sentinel examples for better conversion accuracy
+- **Batch Processing**: Convert large QRadar rule sets efficiently
+- **Validation & Quality**: Rule syntax checking and confidence scoring
 
 ### 🚀 **Enterprise-Ready**
 - **REST API**: Full API server with OpenAPI documentation
@@ -76,7 +96,7 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 
 3. **Configure environment**
    ```bash
-   cp env.example .env
+   cp .env.example .env
    # Edit .env with your settings
    ```
 
@@ -93,11 +113,15 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 # Convert a single Sigma rule to KustoQL
 python3 -m src.canonical.cli convert rule.yml kustoql
 
+# Convert QRadar rule to KustoQL
+python3 -m src.canonical.cli convert qradar_rule.txt kustoql
+
 # Batch convert multiple rules
 python3 -m src.canonical.cli batch-convert ./rules/ kustoql --output-dir ./converted/
 
-# Validate a rule
+# Validate a rule (supports both Sigma and QRadar)
 python3 -m src.canonical.cli validate rule.yml
+python3 -m src.canonical.cli validate qradar_rule.txt --format qradar
 ```
 
 #### API Server
@@ -108,12 +132,35 @@ python3 -m src.canonical.cli serve --host 0.0.0.0 --port 8000
 # Access API documentation at http://localhost:8000/docs
 ```
 
-#### Example Conversion
+#### API Usage Examples
+```bash
+# Convert QRadar rule to KustoQL via API
+curl -X POST "http://localhost:8000/convert/qradar/kustoql" \
+  -H "Content-Type: application/json" \
+  -d '{"rule": "when the event QID is one of the following \"4688\" and when the process name contains \"powershell.exe\""}'
+
+# Ingest Azure Sentinel rules
+curl -X POST "http://localhost:8000/ingest/azure-sentinel" \
+  -H "Content-Type: application/json" \
+  -d '{"force_refresh": false}'
+
+# Validate QRadar rule
+curl -X POST "http://localhost:8000/validate" \
+  -H "Content-Type: application/json" \
+  -d '{"rule": "QRadar rule content", "source_format": "qradar"}'
+```
+
+#### Example Conversions
+
+**Sigma to KustoQL:**
 ```python
 import asyncio
-from src.canonical.core.converter import rule_converter
+from src.canonical.core.converter import RuleConverter
 
-async def convert_rule():
+async def convert_sigma_rule():
+    converter = RuleConverter()
+    await converter.initialize()
+    
     sigma_rule = """
     title: Suspicious PowerShell Execution
     detection:
@@ -123,7 +170,7 @@ async def convert_rule():
         condition: selection
     """
     
-    result = await rule_converter.convert_rule(
+    result = await converter.convert_rule(
         source_rule=sigma_rule,
         source_format="sigma",
         target_format="kustoql"
@@ -132,13 +179,45 @@ async def convert_rule():
     print(f"Converted Rule: {result.target_rule}")
     print(f"Confidence: {result.confidence_score}")
 
-asyncio.run(convert_rule())
+asyncio.run(convert_sigma_rule())
+```
+
+**QRadar to KustoQL:**
+```python
+import asyncio
+from src.canonical.core.converter import RuleConverter
+
+async def convert_qradar_rule():
+    converter = RuleConverter()
+    await converter.initialize()
+    
+    qradar_rule = """
+    Rule Name: Suspicious PowerShell Execution
+    Description: Detects suspicious PowerShell command execution
+    Rule Type: EVENT
+    Enabled: true
+    Severity: 7
+    
+    when the event(s) are detected by the Local system
+    and when the event QID is one of the following "4688"
+    and when the process name contains "powershell.exe"
+    and when the command line contains "-EncodedCommand"
+    and when the event(s) occur in the last 5 minutes
+    """
+    
+    result = await converter.convert_qradar_to_kustoql(qradar_rule)
+    
+    print(f"Converted Rule: {result.target_rule}")
+    print(f"Confidence: {result.confidence_score}")
+    print(f"Field Mappings: {result.metadata.get('field_mappings', {})}")
+
+asyncio.run(convert_qradar_rule())
 ```
 
 ## 📚 Documentation
 
 ### 📖 Core Documentation
-- [System Requirements](SYSTEM_REQUIREMENTS.md) - Hardware and software requirements
+- [System Requirements](system-requirements.md) - Hardware and software requirements
 - [Installation Guide](docs/installation.md) - Detailed setup instructions
 - [API Reference](docs/api.md) - Complete API documentation
 - [CLI Reference](docs/cli.md) - Command-line interface guide
@@ -151,8 +230,10 @@ asyncio.run(convert_rule())
 
 ### 🎓 Examples and Tutorials
 - [Basic Usage Examples](examples/) - Simple conversion examples
+- [QRadar to KustoQL Migration](examples/qradar_to_kustoql_example.py) - QRadar migration example
 - [Integration Patterns](docs/integration.md) - Common integration scenarios
 - [Custom Extensions](docs/extensions.md) - Building custom converters
+- [QRadar Migration Guide](docs/qradar-migration.md) - Complete migration workflow
 
 ## 🏗️ Architecture
 
@@ -163,15 +244,46 @@ graph TB
     B --> D[LLM Service]
     B --> E[Embedding Service]
     B --> F[ChromaDB]
+    B --> N[QRadar Parser]
+    B --> O[Sigma Parser]
     
     F --> G[Sigma Rules<br/>3,015 docs]
     F --> H[MITRE ATT&CK<br/>2,044 docs]
     F --> I[MITRE CAR<br/>102 docs]
     F --> J[Atomic Red Team<br/>1,730 docs]
+    F --> P[Azure Sentinel<br/>Detection Rules<br/>3,000+ docs]
+    F --> Q[Azure Sentinel<br/>Hunting Queries<br/>500+ docs]
+    F --> R[QRadar Rules<br/>Collection]
     
-    D --> K[Qwen2.5-3B-Instruct]
-    E --> L[BGE-large-en-v1.5]
+    D --> K[Qwen2.5-3B-Instruct<br/>Local Processing]
+    E --> L[BGE-large-en-v1.5<br/>Local Embeddings]
+    
+    style K fill:#e8f5e8
+    style L fill:#e8f5e8
+    style P fill:#cce5ff
+    style Q fill:#cce5ff
+    style R fill:#fff2cc
 ```
+
+## 📊 Performance
+
+### Conversion Speed
+- **Sigma Rules**: 2-5 seconds per rule (CPU only)
+- **QRadar Rules**: 5-15 seconds per rule (includes context gathering)
+- **Batch Processing**: 50-200 rules/minute
+- **Local Processing**: No external API latency
+
+### Accuracy Metrics
+- **Conversion Success Rate**: >95% for Sigma, >90% for QRadar
+- **Confidence Scores**: 0.85-0.98 average for Sigma, 0.75-0.95 for QRadar
+- **MITRE Mapping Accuracy**: >90%
+- **Field Mapping Accuracy**: >95% for common fields
+
+### Resource Requirements
+- **RAM**: 8GB minimum, 16GB recommended
+- **CPU**: Multi-core recommended for batch processing
+- **Storage**: 10GB+ for full knowledge base
+- **Network**: None required for conversion (air-gapped compatible)
 
 ## 🔒 License & Usage
 
@@ -184,7 +296,7 @@ This project is licensed under a **Custom License** that permits:
 - ❌ Creating competing commercial products
 - ❌ Hosting as a commercial service
 
-See [LICENSE](LICENSE) for full terms.
+See [license](license) for full terms.
 
 ### Compliance Requirements
 Organizations using Canonical must:
@@ -199,7 +311,7 @@ For commercial licensing, partnerships, or questions about permitted uses:
 
 ## 🤝 Contributing
 
-We welcome contributions from the cybersecurity community! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting:
+We welcome contributions from the cybersecurity community! Please read our [Contributing Guidelines](contributing.md) before submitting:
 
 - 🐛 **Bug Reports**: Use GitHub Issues
 - 💡 **Feature Requests**: Use GitHub Discussions
@@ -214,18 +326,6 @@ cd canonical
 pip3 install -r requirements-dev.txt
 pre-commit install
 ```
-
-## 📊 Performance
-
-### Conversion Speed
-- **CPU Only**: 2-5 seconds per rule
-- **GPU Accelerated**: 0.5-2 seconds per rule
-- **Batch Processing**: 50-400 rules/minute
-
-### Accuracy Metrics
-- **Conversion Success Rate**: >95%
-- **Confidence Scores**: 0.85-0.98 average
-- **MITRE Mapping Accuracy**: >90%
 
 ## 🆘 Support
 
@@ -244,8 +344,10 @@ For enterprise deployments and custom requirements:
 
 ### Data Sources
 - **SigmaHQ**: Sigma detection rules repository
+- **Microsoft**: Azure Sentinel detection rules and hunting queries
 - **MITRE Corporation**: ATT&CK framework and CAR analytics
 - **Red Canary**: Atomic Red Team testing procedures
+- **IBM**: QRadar rule format specifications
 
 ### Technology Stack
 - **Qwen2.5**: Advanced language model by Alibaba
@@ -256,8 +358,6 @@ For enterprise deployments and custom requirements:
 ---
 
 <div align="center">
-
-**Built with ❤️ by [DIER](https://dierhq.com) for the cybersecurity community**
 
 [⭐ Star this repo](https://github.com/dier/canonical) • [🐛 Report bug](https://github.com/dier/canonical/issues) • [💡 Request feature](https://github.com/dier/canonical/discussions)
 
