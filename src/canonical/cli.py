@@ -49,7 +49,7 @@ def cli(debug: bool, log_file: Optional[str]):
 @cli.command()
 @click.argument('source_file', type=click.Path(exists=True, path_type=Path))
 @click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl']))
-@click.option('--source-format', default='sigma', type=click.Choice(['sigma']), help='Source format')
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar']), help='Source format')
 @click.option('--output', '-o', type=click.Path(path_type=Path), help='Output file path')
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
 def convert(source_file: Path, target_format: str, source_format: str, output: Optional[Path], verbose: bool):
@@ -98,16 +98,23 @@ def convert(source_file: Path, target_format: str, source_format: str, output: O
 @cli.command()
 @click.argument('rules_dir', type=click.Path(exists=True, path_type=Path))
 @click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl']))
-@click.option('--source-format', default='sigma', type=click.Choice(['sigma']), help='Source format')
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar']), help='Source format')
 @click.option('--output-dir', '-o', type=click.Path(path_type=Path), help='Output directory')
 @click.option('--max-concurrent', default=5, help='Maximum concurrent conversions')
 def batch_convert(rules_dir: Path, target_format: str, source_format: str, output_dir: Optional[Path], max_concurrent: int):
     """Convert multiple rules in batch."""
     async def _batch_convert():
         try:
-            # Find all rule files
+            # Find all rule files based on source format
             rule_files = []
-            for ext in ['*.yml', '*.yaml']:
+            if source_format == 'sigma':
+                extensions = ['*.yml', '*.yaml']
+            elif source_format == 'qradar':
+                extensions = ['*.txt', '*.rule', '*.aql', '*.qradar']
+            else:
+                extensions = ['*.yml', '*.yaml', '*.txt', '*.rule']
+            
+            for ext in extensions:
                 rule_files.extend(rules_dir.rglob(ext))
             
             if not rule_files:
@@ -167,7 +174,7 @@ def batch_convert(rules_dir: Path, target_format: str, source_format: str, outpu
 
 @cli.command()
 @click.argument('rule_file', type=click.Path(exists=True, path_type=Path))
-@click.option('--source-format', default='sigma', type=click.Choice(['sigma']), help='Source format')
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar']), help='Source format')
 def validate(rule_file: Path, source_format: str):
     """Validate a rule without converting it."""
     async def _validate():
