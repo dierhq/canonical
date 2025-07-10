@@ -197,6 +197,9 @@ temp/
 config.local.yaml
 config.production.yaml
 
+# RunPod deployment files (instance-specific)
+runpod.md
+
 # IDE and editor files
 .vscode/
 .idea/
@@ -213,50 +216,100 @@ config.production.yaml
 ehthumbs.db
 Thumbs.db
 
+# Test files
+test_*
+*_test.py
+test_results/
+coverage_html/
+
 # Backup files
 *.bak
 *.backup
 *.old
 
-# Git repositories (cloned data sources)
-data/repos/
-!data/repos/.gitkeep
+# API keys and credentials
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+service-account.json
 
-# Hugging Face cache
-.huggingface/
+# Local development files
+local/
+dev/
+development/
 
-# Transformers cache
-transformers_cache/
+# Docker files (if not needed in repo)
+docker-compose.override.yml
+.dockerignore
 
-# Model downloads
-models/
-!models/.gitkeep
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
 
-# Output files
-output/
-results/
-converted/
+# Virtual environment
+venv*/
+env*/
+.env*/
 
-# Test output
-test_output/
-test_results/
+# Package manager files
+package-lock.json
+yarn.lock
+Pipfile.lock
 
-# Documentation build
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Documentation builds
 docs/build/
-docs/_build/
+site/
 
 # Coverage reports
 htmlcov/
 .coverage
+.coverage.*
 coverage.xml
+*.cover
 
-# Profiling
+# Pytest
+.pytest_cache/
+.cache/
+
+# Mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Profiling data
 *.prof
 
-# Security
-*.pem
-*.key
-*.crt
-*.p12
-secrets.yaml
-credentials.json 
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Large data files
+*.csv
+*.json
+*.xml
+*.txt
+# But keep small example files
+!examples/*.csv
+!examples/*.json
+!examples/*.xml
+!examples/*.txt
+
+# Compiled translations
+*.mo
+
+# Sphinx documentation
+docs/_build/
+
+# Temporary API test files
+api_test*
+batch_test* 
+canonical
+canonical.pub
