@@ -27,7 +27,6 @@ from .data_ingestion.mitre_ingestion import mitre_ingestion
 from .data_ingestion.car_ingestion import car_ingestion
 from .data_ingestion.atomic_ingestion import atomic_ingestion
 from .data_ingestion.all_ingestion import ingest_all_data
-from .data_ingestion.azure_docs_ingestion import ingest_azure_docs
 
 
 @click.group()
@@ -406,7 +405,9 @@ def ingest_azure_docs():
         try:
             click.echo("🚀 Starting Azure Sentinel documentation ingestion...")
             
-            success = await ingest_azure_docs()
+            # Import here to avoid naming conflict
+            from .data_ingestion.azure_docs_ingestion import ingest_azure_docs as run_azure_ingestion
+            success = await run_azure_ingestion()
             
             if success:
                 click.echo("✅ Azure Sentinel documentation ingestion completed successfully!")
