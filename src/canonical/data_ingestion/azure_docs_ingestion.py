@@ -149,8 +149,11 @@ class AzureDocsIngestion:
             await embedding_service.initialize()
             await chromadb_service.initialize()
             
-            # Create or get collection
-            collection = await chromadb_service.get_or_create_collection(self.collection_name)
+            # Create or get collection directly from ChromaDB client
+            collection = chromadb_service.client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"description": "Azure Sentinel Documentation"}
+            )
             
             # Process chunks in batches
             batch_size = 50
@@ -163,7 +166,7 @@ class AzureDocsIngestion:
                 ids = [chunk["id"] for chunk in batch]
                 
                 # Generate embeddings
-                embeddings = await embedding_service.embed_documents(texts)
+                embeddings = await embedding_service.embed_texts(texts)
                 
                 # Add to ChromaDB
                 collection.add(
