@@ -27,6 +27,7 @@ from .data_ingestion.mitre_ingestion import mitre_ingestion
 from .data_ingestion.car_ingestion import car_ingestion
 from .data_ingestion.atomic_ingestion import atomic_ingestion
 from .data_ingestion.all_ingestion import ingest_all_data
+from .data_ingestion.azure_docs_ingestion import ingest_azure_docs
 
 
 @click.group()
@@ -393,6 +394,29 @@ def ingest_all(force_refresh: bool):
             
         except Exception as e:
             click.echo(f"❌ Ingestion failed: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+def ingest_azure_docs():
+    """Ingest Azure Sentinel documentation PDF."""
+    async def _ingest():
+        try:
+            click.echo("🚀 Starting Azure Sentinel documentation ingestion...")
+            
+            success = await ingest_azure_docs()
+            
+            if success:
+                click.echo("✅ Azure Sentinel documentation ingestion completed successfully!")
+            else:
+                click.echo("❌ Azure Sentinel documentation ingestion failed!")
+                sys.exit(1)
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            logger.error(f"Ingestion error: {e}")
             sys.exit(1)
     
     asyncio.run(_ingest())
