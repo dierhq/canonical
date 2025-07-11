@@ -41,9 +41,10 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 
 ### 🧠 **Local LLM Intelligence**
 - **On-Premises Processing**: Local Qwen2.5-3B-Instruct LLM with no external API calls
-- **Context-Aware Conversions**: Uses vector similarity search across 10,000+ security rules
+- **Context-Aware Conversions**: Uses vector similarity search across 35,000+ security documents
+- **Enhanced Azure Sentinel Context**: 25,000+ documentation chunks for superior KustoQL conversions
 - **MITRE ATT&CK Integration**: Automatic technique mapping and enrichment
-- **Confidence Scoring**: LLM-generated confidence levels for each conversion
+- **Confidence Scoring**: LLM-generated confidence levels for each conversion (85-95%+)
 - **Semantic Understanding**: Advanced language models for accurate translations
 - **Air-Gapped Compatible**: Fully self-contained with local embeddings (BGE-large-en-v1.5)
 
@@ -51,12 +52,13 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 - **3,015 Sigma Rules** from SigmaHQ repository
 - **3,000+ Azure Sentinel Detection Rules** from Microsoft's GitHub repository
 - **500+ Azure Sentinel Hunting Queries** for threat hunting context
+- **25,000+ Azure Sentinel Documentation Chunks** from comprehensive 3000-page PDF - **🆕 NEW**
 - **2,044 MITRE ATT&CK** techniques, tactics, groups, and mitigations
 - **102 MITRE CAR** analytics for additional detection context
 - **1,730 Atomic Red Team** tests for validation procedures
 - **QRadar Rules Collection** for similarity analysis and context enhancement
 
-**Total**: **10,000+ documents** for context-aware conversions
+**Total**: **35,000+ documents** for context-aware conversions
 
 ### 🔄 **QRadar Migration Support**
 - **Comprehensive QRadar Parser**: Supports EVENT, FLOW, OFFENSE, and COMMON rule types
@@ -104,6 +106,9 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
    ```bash
    # Ingest all security intelligence data (~5-10 minutes)
    python3 -m src.canonical.cli data ingest-all --force-refresh
+   
+   # Optional: Ingest Azure Sentinel documentation for enhanced conversions (~20-35 minutes)
+   python3 -m src.canonical.cli data ingest-azure-docs
    ```
 
 ### Basic Usage
@@ -253,6 +258,7 @@ graph TB
     F --> J[Atomic Red Team<br/>1,730 docs]
     F --> P[Azure Sentinel<br/>Detection Rules<br/>3,000+ docs]
     F --> Q[Azure Sentinel<br/>Hunting Queries<br/>500+ docs]
+    F --> S[Azure Sentinel<br/>Documentation<br/>25,000+ chunks]
     F --> R[QRadar Rules<br/>Collection]
     
     D --> K[Qwen2.5-3B-Instruct<br/>Local Processing]
