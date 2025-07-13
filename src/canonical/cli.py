@@ -48,8 +48,8 @@ def cli(debug: bool, log_file: Optional[str]):
 
 @cli.command()
 @click.argument('source_file', type=click.Path(exists=True, path_type=Path))
-@click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl']))
-@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar']), help='Source format')
+@click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl', 'sigma']))
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar', 'kibanaql']), help='Source format')
 @click.option('--output', '-o', type=click.Path(path_type=Path), help='Output file path')
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
 def convert(source_file: Path, target_format: str, source_format: str, output: Optional[Path], verbose: bool):
@@ -97,8 +97,8 @@ def convert(source_file: Path, target_format: str, source_format: str, output: O
 
 @cli.command()
 @click.argument('rules_dir', type=click.Path(exists=True, path_type=Path))
-@click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl']))
-@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar']), help='Source format')
+@click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl', 'sigma']))
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar', 'kibanaql']), help='Source format')
 @click.option('--output-dir', '-o', type=click.Path(path_type=Path), help='Output directory')
 @click.option('--max-concurrent', default=5, help='Maximum concurrent conversions')
 def batch_convert(rules_dir: Path, target_format: str, source_format: str, output_dir: Optional[Path], max_concurrent: int):
@@ -111,8 +111,10 @@ def batch_convert(rules_dir: Path, target_format: str, source_format: str, outpu
                 extensions = ['*.yml', '*.yaml']
             elif source_format == 'qradar':
                 extensions = ['*.txt', '*.rule', '*.aql', '*.qradar']
+            elif source_format == 'kibanaql':
+                extensions = ['*.json', '*.yml', '*.yaml', '*.kql', '*.kibana']
             else:
-                extensions = ['*.yml', '*.yaml', '*.txt', '*.rule']
+                extensions = ['*.yml', '*.yaml', '*.txt', '*.rule', '*.json', '*.kql']
             
             for ext in extensions:
                 rule_files.extend(rules_dir.rglob(ext))
@@ -174,7 +176,7 @@ def batch_convert(rules_dir: Path, target_format: str, source_format: str, outpu
 
 @cli.command()
 @click.argument('rule_file', type=click.Path(exists=True, path_type=Path))
-@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar']), help='Source format')
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar', 'kibanaql']), help='Source format')
 def validate(rule_file: Path, source_format: str):
     """Validate a rule without converting it."""
     async def _validate():

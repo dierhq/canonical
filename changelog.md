@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **KibanaQL Source Language Support** - **🆕 NEW**
+  - KibanaQL rule parser with JSON, YAML, and text format support
+  - KibanaQL → KustoQL (Azure Sentinel) conversion
+  - KibanaQL → KibanaQL (validation/normalization) conversion
+  - KibanaQL → EQL (Event Query Language) conversion
+  - KibanaQL → QRadar AQL (IBM QRadar) conversion
+  - KibanaQL → Splunk SPL (Splunk Enterprise Security) conversion
+  - KibanaQL → Sigma (Universal Detection Format) conversion
+  - CLI support for KibanaQL source format
+  - API endpoints for all KibanaQL conversion paths
+  - MITRE ATT&CK technique extraction from KibanaQL rules
+  - Rule complexity analysis for KibanaQL rules
+  - Comprehensive rule validation for KibanaQL syntax
+
 - Initial public release preparation
 - Custom license for internal SOC/MDR/corporate use
 - Comprehensive documentation for open source release

@@ -21,6 +21,7 @@ class SourceFormat(str, Enum):
     """Supported source rule formats."""
     SIGMA = "sigma"
     QRADAR = "qradar"
+    KIBANAQL = "kibanaql"
 
 
 class TargetFormat(str, Enum):
@@ -30,6 +31,7 @@ class TargetFormat(str, Enum):
     EQL = "eql"
     QRADAR = "qradar"
     SPL = "spl"
+    SIGMA = "sigma"
 
 
 class SigmaRule(BaseModel):
@@ -208,6 +210,58 @@ class AzureSentinelHuntingQuery(BaseModel):
     last_modified: Optional[str] = None
     version: Optional[str] = None
     source: str = "Azure Sentinel"
+    
+    # Extracted metadata
+    mitre_techniques: List[str] = Field(default_factory=list)
+    complexity: str = "medium"
+    is_valid: bool = True
+
+
+class KibanaQLRule(BaseModel):
+    """Kibana Query Language (KQL) rule structure."""
+    rule_id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    query: str
+    index_patterns: List[str] = Field(default_factory=list)
+    query_type: str = "query"  # "query", "eql", "threshold", "machine_learning"
+    language: str = "kuery"  # "kuery", "lucene", "eql"
+    
+    # Rule configuration
+    enabled: bool = True
+    severity: str = "medium"  # "low", "medium", "high", "critical"
+    risk_score: Optional[int] = None
+    tags: List[str] = Field(default_factory=list)
+    
+    # Time-based settings
+    interval: Optional[str] = None  # e.g., "5m", "1h"
+    from_time: Optional[str] = None  # e.g., "now-6m"
+    to_time: Optional[str] = None  # e.g., "now"
+    
+    # Threshold settings (for threshold rules)
+    threshold_field: Optional[str] = None
+    threshold_value: Optional[int] = None
+    threshold_cardinality: Optional[List[Dict[str, Any]]] = None
+    
+    # ML settings (for machine learning rules)
+    anomaly_threshold: Optional[int] = None
+    machine_learning_job_id: Optional[str] = None
+    
+    # Actions and notifications
+    actions: List[Dict[str, Any]] = Field(default_factory=list)
+    throttle: Optional[str] = None
+    
+    # Metadata
+    author: Optional[str] = None
+    created_date: Optional[str] = None
+    last_modified: Optional[str] = None
+    version: Optional[str] = None
+    license: Optional[str] = None
+    references: List[str] = Field(default_factory=list)
+    false_positives: List[str] = Field(default_factory=list)
+    
+    # MITRE ATT&CK mapping
+    threat: List[Dict[str, Any]] = Field(default_factory=list)
     
     # Extracted metadata
     mitre_techniques: List[str] = Field(default_factory=list)
