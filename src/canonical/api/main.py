@@ -244,6 +244,126 @@ async def convert_qradar_to_kustoql(request: Dict[str, Any]):
         )
 
 
+@app.post("/convert/kibanaql/kustoql", response_model=ConversionResponse)
+async def convert_kibanaql_to_kustoql(request: Dict[str, Any]):
+    """Convert KibanaQL rule to KustoQL (Azure Sentinel)."""
+    try:
+        kibanaql_rule = request.get("rule")
+        if not kibanaql_rule:
+            raise HTTPException(status_code=400, detail="Missing 'rule' field")
+        
+        response = await rule_converter.convert_kibanaql_to_kustoql(kibanaql_rule)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"KibanaQL to KustoQL conversion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion failed: {str(e)}"
+        )
+
+
+@app.post("/convert/kibanaql/kibanaql", response_model=ConversionResponse)
+async def convert_kibanaql_to_kibanaql(request: Dict[str, Any]):
+    """Convert KibanaQL rule to KibanaQL (validation/normalization)."""
+    try:
+        kibanaql_rule = request.get("rule")
+        if not kibanaql_rule:
+            raise HTTPException(status_code=400, detail="Missing 'rule' field")
+        
+        response = await rule_converter.convert_kibanaql_to_kibanaql(kibanaql_rule)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"KibanaQL to KibanaQL conversion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion failed: {str(e)}"
+        )
+
+
+@app.post("/convert/kibanaql/eql", response_model=ConversionResponse)
+async def convert_kibanaql_to_eql(request: Dict[str, Any]):
+    """Convert KibanaQL rule to EQL (Event Query Language)."""
+    try:
+        kibanaql_rule = request.get("rule")
+        if not kibanaql_rule:
+            raise HTTPException(status_code=400, detail="Missing 'rule' field")
+        
+        response = await rule_converter.convert_kibanaql_to_eql(kibanaql_rule)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"KibanaQL to EQL conversion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion failed: {str(e)}"
+        )
+
+
+@app.post("/convert/kibanaql/qradar", response_model=ConversionResponse)
+async def convert_kibanaql_to_qradar(request: Dict[str, Any]):
+    """Convert KibanaQL rule to QRadar AQL."""
+    try:
+        kibanaql_rule = request.get("rule")
+        if not kibanaql_rule:
+            raise HTTPException(status_code=400, detail="Missing 'rule' field")
+        
+        response = await rule_converter.convert_kibanaql_to_qradar(kibanaql_rule)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"KibanaQL to QRadar conversion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion failed: {str(e)}"
+        )
+
+
+@app.post("/convert/kibanaql/spl", response_model=ConversionResponse)
+async def convert_kibanaql_to_spl(request: Dict[str, Any]):
+    """Convert KibanaQL rule to Splunk SPL."""
+    try:
+        kibanaql_rule = request.get("rule")
+        if not kibanaql_rule:
+            raise HTTPException(status_code=400, detail="Missing 'rule' field")
+        
+        response = await rule_converter.convert_kibanaql_to_spl(kibanaql_rule)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"KibanaQL to SPL conversion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion failed: {str(e)}"
+        )
+
+
+@app.post("/convert/kibanaql/sigma", response_model=ConversionResponse)
+async def convert_kibanaql_to_sigma(request: Dict[str, Any]):
+    """Convert KibanaQL rule to Sigma."""
+    try:
+        kibanaql_rule = request.get("rule")
+        if not kibanaql_rule:
+            raise HTTPException(status_code=400, detail="Missing 'rule' field")
+        
+        response = await rule_converter.convert_kibanaql_to_sigma(kibanaql_rule)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"KibanaQL to Sigma conversion error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Conversion failed: {str(e)}"
+        )
+
+
 @app.post("/convert/batch")
 async def batch_convert_rules(request: Dict[str, Any]):
     """Convert multiple rules in batch."""

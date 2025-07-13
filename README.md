@@ -35,9 +35,15 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 - **Sigma** → **EQL** (Event Query Language)
 - **Sigma** → **Splunk SPL** (Splunk Enterprise Security)
 - **Sigma** → **QRadar AQL** (IBM QRadar)
-- **QRadar** → **KustoQL** (Azure Sentinel) - **🆕 NEW**
+- **QRadar** → **KustoQL** (Azure Sentinel)
+- **KibanaQL** → **KustoQL** (Azure Sentinel) - **🆕 NEW**
+- **KibanaQL** → **KibanaQL** (Elastic SIEM) - **🆕 NEW**
+- **KibanaQL** → **EQL** (Event Query Language) - **🆕 NEW**
+- **KibanaQL** → **QRadar AQL** (IBM QRadar) - **🆕 NEW**
+- **KibanaQL** → **Splunk SPL** (Splunk Enterprise Security) - **🆕 NEW**
+- **KibanaQL** → **Sigma** (Universal Detection Format) - **🆕 NEW**
 
-**Total**: **6 conversion paths** across **2 source formats** and **5 target formats**
+**Total**: **12 conversion paths** across **3 source formats** and **6 target formats**
 
 ### 🧠 **Local LLM Intelligence**
 - **On-Premises Processing**: Local Qwen2.5-3B-Instruct LLM with no external API calls
@@ -121,12 +127,19 @@ python3 -m src.canonical.cli convert rule.yml kustoql
 # Convert QRadar rule to KustoQL
 python3 -m src.canonical.cli convert qradar_rule.txt kustoql
 
+# Convert KibanaQL rule to KustoQL
+python3 -m src.canonical.cli convert kibana_rule.json kustoql --source-format kibanaql
+
+# Convert KibanaQL rule to Sigma
+python3 -m src.canonical.cli convert kibana_rule.json sigma --source-format kibanaql
+
 # Batch convert multiple rules
 python3 -m src.canonical.cli batch-convert ./rules/ kustoql --output-dir ./converted/
 
-# Validate a rule (supports both Sigma and QRadar)
+# Validate a rule (supports Sigma, QRadar, and KibanaQL)
 python3 -m src.canonical.cli validate rule.yml
-python3 -m src.canonical.cli validate qradar_rule.txt --format qradar
+python3 -m src.canonical.cli validate qradar_rule.txt --source-format qradar
+python3 -m src.canonical.cli validate kibana_rule.json --source-format kibanaql
 ```
 
 #### API Server
@@ -144,15 +157,25 @@ curl -X POST "http://localhost:8000/convert/qradar/kustoql" \
   -H "Content-Type: application/json" \
   -d '{"rule": "when the event QID is one of the following \"4688\" and when the process name contains \"powershell.exe\""}'
 
+# Convert KibanaQL rule to KustoQL via API
+curl -X POST "http://localhost:8000/convert/kibanaql/kustoql" \
+  -H "Content-Type: application/json" \
+  -d '{"rule": "{\"name\": \"Suspicious PowerShell\", \"query\": \"process.name:powershell.exe AND process.command_line:*EncodedCommand*\"}"}'
+
+# Convert KibanaQL rule to Sigma via API
+curl -X POST "http://localhost:8000/convert/kibanaql/sigma" \
+  -H "Content-Type: application/json" \
+  -d '{"rule": "{\"name\": \"Suspicious PowerShell\", \"query\": \"process.name:powershell.exe AND process.command_line:*EncodedCommand*\"}"}'
+
 # Ingest Azure Sentinel rules
 curl -X POST "http://localhost:8000/ingest/azure-sentinel" \
   -H "Content-Type: application/json" \
   -d '{"force_refresh": false}'
 
-# Validate QRadar rule
+# Validate KibanaQL rule
 curl -X POST "http://localhost:8000/validate" \
   -H "Content-Type: application/json" \
-  -d '{"rule": "QRadar rule content", "source_format": "qradar"}'
+  -d '{"rule": "KibanaQL rule content", "source_format": "kibanaql"}'
 ```
 
 #### Example Conversions
@@ -219,6 +242,100 @@ async def convert_qradar_rule():
 asyncio.run(convert_qradar_rule())
 ```
 
+**KibanaQL to KustoQL:**
+```python
+import asyncio
+from src.canonical.core.converter import RuleConverter
+
+async def convert_kibanaql_rule():
+    converter = RuleConverter()
+    await converter.initialize()
+    
+    kibanaql_rule = """
+    {
+        "name": "Suspicious PowerShell Execution",
+        "description": "Detects suspicious PowerShell command execution with encoded commands",
+        "query": "process.name:powershell.exe AND process.command_line:*EncodedCommand*",
+        "index_patterns": ["winlogbeat-*", "logs-endpoint.events.process-*"],
+        "language": "kuery",
+        "query_type": "query",
+        "severity": "high",
+        "risk_score": 73,
+        "tags": ["T1059.001", "PowerShell", "Execution"],
+        "interval": "5m",
+        "from_time": "now-6m",
+        "threat": [
+            {
+                "framework": "MITRE ATT&CK",
+                "tactic": {
+                    "id": "TA0002",
+                    "name": "Execution"
+                },
+                "technique": {
+                    "id": "T1059.001",
+                    "name": "PowerShell"
+                }
+            }
+        ]
+    }
+    """
+    
+    result = await converter.convert_kibanaql_to_kustoql(kibanaql_rule)
+    
+    print(f"Converted Rule: {result.target_rule}")
+    print(f"Confidence: {result.confidence_score}")
+    print(f"MITRE Techniques: {result.mitre_techniques}")
+
+asyncio.run(convert_kibanaql_rule())
+```
+
+**KibanaQL to Sigma:**
+```python
+import asyncio
+from src.canonical.core.converter import RuleConverter
+
+async def convert_kibanaql_to_sigma():
+    converter = RuleConverter()
+    await converter.initialize()
+    
+    kibanaql_rule = """
+    {
+        "name": "Suspicious PowerShell Execution",
+        "description": "Detects suspicious PowerShell command execution with encoded commands",
+        "query": "process.name:powershell.exe AND process.command_line:*EncodedCommand*",
+        "index_patterns": ["winlogbeat-*", "logs-endpoint.events.process-*"],
+        "language": "kuery",
+        "query_type": "query",
+        "severity": "high",
+        "risk_score": 73,
+        "tags": ["T1059.001", "PowerShell", "Execution"],
+        "author": "Security Team",
+        "references": ["https://attack.mitre.org/techniques/T1059/001/"],
+        "threat": [
+            {
+                "framework": "MITRE ATT&CK",
+                "tactic": {
+                    "id": "TA0002",
+                    "name": "Execution"
+                },
+                "technique": {
+                    "id": "T1059.001",
+                    "name": "PowerShell"
+                }
+            }
+        ]
+    }
+    """
+    
+    result = await converter.convert_kibanaql_to_sigma(kibanaql_rule)
+    
+    print(f"Converted Rule: {result.target_rule}")
+    print(f"Confidence: {result.confidence_score}")
+    print(f"MITRE Techniques: {result.mitre_techniques}")
+
+asyncio.run(convert_kibanaql_to_sigma())
+```
+
 ## 📚 Documentation
 
 ### 📖 Core Documentation
@@ -251,6 +368,7 @@ graph TB
     B --> F[ChromaDB]
     B --> N[QRadar Parser]
     B --> O[Sigma Parser]
+    B --> KP[KibanaQL Parser]
     
     F --> G[Sigma Rules<br/>3,015 docs]
     F --> H[MITRE ATT&CK<br/>2,044 docs]

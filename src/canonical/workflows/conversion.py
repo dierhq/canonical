@@ -90,6 +90,13 @@ class ConversionWorkflow:
                 parsed_rule = qradar_parser.parse_rule(request.source_rule)
                 state["parsed_rule"] = qradar_parser.convert_to_dict(parsed_rule)
                 logger.info(f"Successfully parsed QRadar rule: {parsed_rule.name}")
+            elif request.source_format.value == "kibanaql":
+                # Parse KibanaQL rule
+                from ..parsers.kibanaql import KibanaQLParser
+                kibanaql_parser = KibanaQLParser()
+                parsed_rule = kibanaql_parser.parse_rule(request.source_rule)
+                state["parsed_rule"] = kibanaql_parser.convert_to_dict(parsed_rule)
+                logger.info(f"Successfully parsed KibanaQL rule: {parsed_rule.name}")
             else:
                 raise ValueError(f"Unsupported source format: {request.source_format}")
             
@@ -121,6 +128,12 @@ class ConversionWorkflow:
             elif request.source_format.value == "qradar":
                 # Extract from parsed QRadar rule
                 mitre_techniques = parsed_rule.get("mitre_techniques", [])
+            elif request.source_format.value == "kibanaql":
+                # Extract from parsed KibanaQL rule
+                from ..parsers.kibanaql import KibanaQLParser
+                kibanaql_parser = KibanaQLParser()
+                rule_obj = kibanaql_parser.parse_rule(request.source_rule)
+                mitre_techniques = kibanaql_parser.extract_mitre_techniques(rule_obj)
             
             state["mitre_techniques"] = mitre_techniques
             logger.info(f"Extracted {len(mitre_techniques)} MITRE techniques")

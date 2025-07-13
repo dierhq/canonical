@@ -182,6 +182,96 @@ class RuleConverter:
             target_format=TargetFormat.KUSTOQL
         )
     
+    async def convert_kibanaql_to_kustoql(self, kibanaql_rule: str) -> ConversionResponse:
+        """Convert KibanaQL rule to KustoQL.
+        
+        Args:
+            kibanaql_rule: KibanaQL rule content
+            
+        Returns:
+            Conversion response
+        """
+        return await self.convert_rule(
+            source_rule=kibanaql_rule,
+            source_format=SourceFormat.KIBANAQL,
+            target_format=TargetFormat.KUSTOQL
+        )
+    
+    async def convert_kibanaql_to_kibanaql(self, kibanaql_rule: str) -> ConversionResponse:
+        """Convert KibanaQL rule to KibanaQL (validation/normalization).
+        
+        Args:
+            kibanaql_rule: KibanaQL rule content
+            
+        Returns:
+            Conversion response
+        """
+        return await self.convert_rule(
+            source_rule=kibanaql_rule,
+            source_format=SourceFormat.KIBANAQL,
+            target_format=TargetFormat.KIBANAQL
+        )
+    
+    async def convert_kibanaql_to_eql(self, kibanaql_rule: str) -> ConversionResponse:
+        """Convert KibanaQL rule to EQL.
+        
+        Args:
+            kibanaql_rule: KibanaQL rule content
+            
+        Returns:
+            Conversion response
+        """
+        return await self.convert_rule(
+            source_rule=kibanaql_rule,
+            source_format=SourceFormat.KIBANAQL,
+            target_format=TargetFormat.EQL
+        )
+    
+    async def convert_kibanaql_to_qradar(self, kibanaql_rule: str) -> ConversionResponse:
+        """Convert KibanaQL rule to QRadar.
+        
+        Args:
+            kibanaql_rule: KibanaQL rule content
+            
+        Returns:
+            Conversion response
+        """
+        return await self.convert_rule(
+            source_rule=kibanaql_rule,
+            source_format=SourceFormat.KIBANAQL,
+            target_format=TargetFormat.QRADAR
+        )
+    
+    async def convert_kibanaql_to_spl(self, kibanaql_rule: str) -> ConversionResponse:
+        """Convert KibanaQL rule to SPL.
+        
+        Args:
+            kibanaql_rule: KibanaQL rule content
+            
+        Returns:
+            Conversion response
+        """
+        return await self.convert_rule(
+            source_rule=kibanaql_rule,
+            source_format=SourceFormat.KIBANAQL,
+            target_format=TargetFormat.SPL
+        )
+    
+    async def convert_kibanaql_to_sigma(self, kibanaql_rule: str) -> ConversionResponse:
+        """Convert KibanaQL rule to Sigma.
+        
+        Args:
+            kibanaql_rule: KibanaQL rule content
+            
+        Returns:
+            Conversion response
+        """
+        return await self.convert_rule(
+            source_rule=kibanaql_rule,
+            source_format=SourceFormat.KIBANAQL,
+            target_format=TargetFormat.SIGMA
+        )
+    
     async def batch_convert(
         self,
         rules: List[Dict[str, Any]],
@@ -291,6 +381,26 @@ class RuleConverter:
                 # Get rule analysis
                 complexity = parsed_rule.complexity
                 mitre_techniques = parsed_rule.mitre_techniques
+                
+                return {
+                    "valid": is_valid,
+                    "errors": errors,
+                    "complexity": complexity,
+                    "mitre_techniques": mitre_techniques,
+                    "title": parsed_rule.name,
+                    "description": parsed_rule.description
+                }
+            elif source_format == SourceFormat.KIBANAQL:
+                from ..parsers.kibanaql import KibanaQLParser
+                
+                # Parse and validate the rule
+                kibanaql_parser = KibanaQLParser()
+                parsed_rule = kibanaql_parser.parse_rule(rule_content)
+                is_valid, errors = kibanaql_parser.validate_rule(parsed_rule)
+                
+                # Get rule analysis
+                complexity = kibanaql_parser.analyze_rule_complexity(parsed_rule)
+                mitre_techniques = kibanaql_parser.extract_mitre_techniques(parsed_rule)
                 
                 return {
                     "valid": is_valid,
