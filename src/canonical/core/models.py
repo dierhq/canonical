@@ -164,7 +164,7 @@ class AzureSentinelDetection(BaseModel):
     name: str
     description: Optional[str] = None
     severity: str  # "Low", "Medium", "High", "Critical"
-    query: str
+    query: Optional[str] = ""
     query_frequency: Optional[str] = None
     query_period: Optional[str] = None
     trigger_operator: Optional[str] = None
@@ -198,7 +198,7 @@ class AzureSentinelHuntingQuery(BaseModel):
     query_id: Optional[str] = None
     name: str
     description: Optional[str] = None
-    query: str
+    query: Optional[str] = ""
     data_types: List[str] = Field(default_factory=list)
     tactics: List[str] = Field(default_factory=list)
     techniques: List[str] = Field(default_factory=list)

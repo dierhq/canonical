@@ -209,14 +209,19 @@ class AzureSentinelIngestion:
         """
         detection_files = []
         
-        # Look for detection rules in the Detections directory
-        detections_dir = self.repo_path / "Detections"
-        if detections_dir.exists():
-            # Look for YAML files (detection rules)
-            for file_path in detections_dir.rglob("*.yaml"):
-                detection_files.append(file_path)
-            for file_path in detections_dir.rglob("*.yml"):
-                detection_files.append(file_path)
+        # Look for detection rules in multiple directories
+        search_dirs = [
+            self.repo_path / "Detections",
+            self.repo_path / "Solutions"
+        ]
+        
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                # Look for YAML files (detection rules)
+                for file_path in search_dir.rglob("*.yaml"):
+                    detection_files.append(file_path)
+                for file_path in search_dir.rglob("*.yml"):
+                    detection_files.append(file_path)
         
         return detection_files
     
@@ -228,19 +233,24 @@ class AzureSentinelIngestion:
         """
         hunting_files = []
         
-        # Look for hunting queries in the Hunting Queries directory
-        hunting_dir = self.repo_path / "Hunting Queries"
-        if hunting_dir.exists():
-            # Look for KQL files (hunting queries)
-            for file_path in hunting_dir.rglob("*.kql"):
-                hunting_files.append(file_path)
-            for file_path in hunting_dir.rglob("*.kusto"):
-                hunting_files.append(file_path)
-            # Also look for YAML files that might contain hunting queries
-            for file_path in hunting_dir.rglob("*.yaml"):
-                hunting_files.append(file_path)
-            for file_path in hunting_dir.rglob("*.yml"):
-                hunting_files.append(file_path)
+        # Look for hunting queries in multiple directories
+        search_dirs = [
+            self.repo_path / "Hunting Queries",
+            self.repo_path / "Solutions"
+        ]
+        
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                # Look for KQL files (hunting queries)
+                for file_path in search_dir.rglob("*.kql"):
+                    hunting_files.append(file_path)
+                for file_path in search_dir.rglob("*.kusto"):
+                    hunting_files.append(file_path)
+                # Also look for YAML files that might contain hunting queries
+                for file_path in search_dir.rglob("*.yaml"):
+                    hunting_files.append(file_path)
+                for file_path in search_dir.rglob("*.yml"):
+                    hunting_files.append(file_path)
         
         return hunting_files
     
@@ -282,7 +292,10 @@ class AzureSentinelIngestion:
                 metadata = self._create_detection_metadata(detection_rule, detection_file)
                 
                 # Create document ID
-                doc_id = f"azure_detection_{detection_rule.rule_id or detection_file.stem}"
+                # Generate unique ID for the document using more entropy
+                import hashlib
+                content_hash = hashlib.sha256((str(detection_rule.name) + str(detection_file)).encode()).hexdigest()[:16]
+                doc_id = f"azure_detection_{content_hash}"
                 
                 documents.append(rule_summary)
                 metadatas.append(metadata)
@@ -343,7 +356,10 @@ class AzureSentinelIngestion:
                 metadata = self._create_hunting_metadata(hunting_query, hunting_file)
                 
                 # Create document ID
-                doc_id = f"azure_hunting_{hunting_query.query_id or hunting_file.stem}"
+                # Generate unique ID for the document using more entropy
+                import hashlib
+                content_hash = hashlib.sha256((str(hunting_query.name) + str(hunting_file)).encode()).hexdigest()[:16]
+                doc_id = f"azure_hunting_{content_hash}"
                 
                 documents.append(query_summary)
                 metadatas.append(metadata)
@@ -721,11 +737,25 @@ class AzureSentinelIngestion:
         if not detection.name or detection.name.strip() == "":
             errors.append("Detection rule name is required")
         
-        if not detection.query or detection.query.strip() == "":
-            errors.append("Detection rule query is required")
+        # Make query optional for template rules
+        # if not detection.query or detection.query.strip() == "":
+        #     errors.append("Detection rule query is required")
         
-        if detection.severity not in ["Low", "Medium", "High", "Critical"]:
-            errors.append("Severity must be one of: Low, Medium, High, Critical")
+        # Make severity validation more flexible
+        if detection.severity and detection.severity not in ["Low", "Medium", "High", "Critical", "Informational"]:
+            # Try to normalize common severity values
+            severity_mapping = {
+                "low": "Low",
+                "medium": "Medium", 
+                "high": "High",
+                "critical": "Critical",
+                "info": "Informational",
+                "informational": "Informational"
+            }
+            if detection.severity.lower() in severity_mapping:
+                detection.severity = severity_mapping[detection.severity.lower()]
+            else:
+                errors.append("Severity must be one of: Low, Medium, High, Critical, Informational")
         
         return len(errors) == 0, errors
     
@@ -743,8 +773,9 @@ class AzureSentinelIngestion:
         if not hunting_query.name or hunting_query.name.strip() == "":
             errors.append("Hunting query name is required")
         
-        if not hunting_query.query or hunting_query.query.strip() == "":
-            errors.append("Hunting query content is required")
+        # Make query content optional for template queries
+        # if not hunting_query.query or hunting_query.query.strip() == "":
+        #     errors.append("Hunting query content is required")
         
         return len(errors) == 0, errors
     
