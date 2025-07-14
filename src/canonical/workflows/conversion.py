@@ -23,6 +23,8 @@ from ..parsers.sigma import sigma_parser
 from ..services.embedding import embedding_service
 from ..services.chromadb import chromadb_service
 from ..services.llm import llm_service
+from ..services.enhanced_llm import enhanced_llm_service
+from ..services.hybrid_retrieval import hybrid_retrieval_service
 
 
 class ConversionState(TypedDict):
@@ -193,140 +195,95 @@ class ConversionWorkflow:
         return state
     
     async def _gather_context_node(self, state: ConversionState) -> ConversionState:
-        """Gather additional context from knowledge base."""
+        """Gather additional context from knowledge base using enhanced retrieval."""
         try:
-            logger.info("Gathering context data")
+            logger.info("Gathering enhanced context data")
             
             if state.get("error"):
                 return state
             
-            context_data = {}
-            mitre_techniques = state.get("mitre_techniques", [])
             request = state["request"]
             
-            # Gather MITRE technique details
-            if mitre_techniques:
-                mitre_details = []
-                for technique_id in mitre_techniques:
-                    technique_info = await chromadb_service.find_mitre_techniques(
-                        query=f"technique {technique_id}",
-                        n_results=1
-                    )
-                    if technique_info:
-                        mitre_details.extend(technique_info)
-                
-                context_data["mitre_details"] = mitre_details
-            
-            # Gather Atomic Red Team tests
-            if mitre_techniques:
-                atomic_tests = []
-                for technique_id in mitre_techniques:
-                    tests = await chromadb_service.find_atomic_tests(
-                        technique_id=technique_id,
-                        n_results=2
-                    )
-                    atomic_tests.extend(tests)
-                
-                context_data["atomic_tests"] = atomic_tests
-            
-            # Gather CAR analytics and create rule summary
-            if request.source_format.value == "sigma":
-                rule_obj = sigma_parser.parse_rule(request.source_rule)
-                rule_summary = sigma_parser.extract_rule_summary(rule_obj)
-            elif request.source_format.value == "qradar":
-                from ..parsers.qradar import qradar_parser
-                rule_obj = qradar_parser.parse_rule(request.source_rule)
-                rule_summary = qradar_parser.extract_rule_summary(rule_obj)
-            else:
-                rule_summary = "Unknown rule format"
-            
-            car_analytics = await chromadb_service.find_car_analytics(
-                query=rule_summary,
-                n_results=3
+            # Use enhanced hybrid retrieval for comprehensive context
+            enhanced_context = await hybrid_retrieval_service.retrieve_context_for_conversion(
+                rule_content=request.source_rule,
+                source_format=request.source_format.value,
+                target_format=request.target_format.value
             )
-            context_data["car_analytics"] = car_analytics
             
-            # For QRadar to KustoQL conversion, gather Azure Sentinel examples
-            if (request.source_format.value == "qradar" and 
-                request.target_format.value == "kustoql"):
-                
-                # Search for relevant Azure Sentinel detection rules
-                azure_detections = await chromadb_service.find_azure_sentinel_detections(
-                    query=rule_summary,
-                    n_results=3
-                )
-                context_data["azure_sentinel_examples"] = azure_detections
-                
-                # Also search for hunting queries
-                azure_hunting = await chromadb_service.find_azure_sentinel_hunting_queries(
-                    query=rule_summary,
-                    n_results=2
-                )
-                context_data["azure_hunting_examples"] = azure_hunting
-            
-            state["context_data"] = context_data
-            logger.info("Context data gathered successfully")
+            # Store enhanced context
+            state["context_data"] = enhanced_context
+            logger.info(f"Enhanced context gathered with {len(enhanced_context.get('field_names', []))} field names")
             
         except Exception as e:
-            logger.error(f"Failed to gather context: {e}")
-            # Don't set error here as this is not critical
+            logger.error(f"Failed to gather enhanced context: {e}")
+            # Fallback to original context gathering
             state["context_data"] = {}
         
         return state
     
     async def _convert_rule_node(self, state: ConversionState) -> ConversionState:
-        """Convert the rule using the LLM."""
+        """Convert the rule using the enhanced LLM."""
         try:
-            logger.info("Converting rule with LLM")
+            logger.info("Converting rule with enhanced LLM")
             
             if state.get("error"):
                 return state
             
             request = state["request"]
             
-            # Prepare context for LLM
-            context = {
-                "mitre_techniques": state.get("mitre_techniques", []),
-                "similar_rules": state.get("similar_rules", []),
-                "context_data": state.get("context_data", {})
-            }
-            
-            # Add Azure Sentinel examples for QRadar to KustoQL conversion
-            if (request.source_format.value == "qradar" and 
-                request.target_format.value == "kustoql"):
-                context_data = state.get("context_data", {})
-                context["azure_sentinel_examples"] = context_data.get("azure_sentinel_examples", [])
-                context["azure_hunting_examples"] = context_data.get("azure_hunting_examples", [])
-            
-            # Convert rule using appropriate LLM method
-            if (request.source_format.value == "qradar" and 
-                request.target_format.value == "kustoql"):
-                # Use specialized QRadar to KustoQL conversion
-                conversion_result = await llm_service.convert_qradar_to_kustoql(
-                    qradar_rule=request.source_rule,
-                    context=context
-                )
-            else:
-                # Use general Sigma conversion
-                conversion_result = await llm_service.convert_sigma_rule(
-                    sigma_rule=request.source_rule,
-                    target_format=request.target_format,
-                    context=context
-                )
+            # Use enhanced LLM service with retry logic
+            conversion_result = await enhanced_llm_service.convert_with_retry(
+                source_rule=request.source_rule,
+                source_format=request.source_format.value,
+                target_format=request.target_format.value,
+                max_retries=2
+            )
             
             state["conversion_result"] = conversion_result
-            logger.info("Rule conversion completed")
+            logger.info("Enhanced rule conversion completed")
             
         except Exception as e:
-            logger.error(f"Failed to convert rule: {e}")
-            state["error"] = f"Rule conversion failed: {str(e)}"
+            logger.error(f"Failed to convert rule with enhanced LLM: {e}")
+            # Fallback to original LLM service
+            try:
+                logger.info("Falling back to original LLM service")
+                request = state["request"]
+                
+                # Prepare context for original LLM
+                context = {
+                    "mitre_techniques": state.get("mitre_techniques", []),
+                    "similar_rules": state.get("similar_rules", []),
+                    "context_data": state.get("context_data", {})
+                }
+                
+                # Use original LLM service
+                if (request.source_format.value == "qradar" and 
+                    request.target_format.value == "kustoql"):
+                    conversion_result = await llm_service.convert_qradar_to_kustoql(
+                        qradar_rule=request.source_rule,
+                        context=context
+                    )
+                else:
+                    conversion_result = await llm_service.convert_sigma_rule(
+                        sigma_rule=request.source_rule,
+                        target_format=request.target_format,
+                        context=context
+                    )
+                
+                state["conversion_result"] = conversion_result
+                logger.info("Fallback conversion completed")
+                
+            except Exception as fallback_error:
+                logger.error(f"Fallback conversion also failed: {fallback_error}")
+                state["error"] = f"Rule conversion failed: {str(e)}, Fallback also failed: {str(fallback_error)}"
         
         return state
     
     async def _validate_result_node(self, state: ConversionState) -> ConversionState:
-        """Validate the conversion result."""
+        """Validate the conversion result with enhanced guardrails."""
         try:
-            logger.info("Validating conversion result")
+            logger.info("Validating conversion result with guardrails")
             
             if state.get("error"):
                 return state
@@ -336,22 +293,86 @@ class ConversionWorkflow:
                 state["error"] = "No conversion result available"
                 return state
             
-            # Basic validation
+            request = state["request"]
+            
+            # Enhanced validation with guardrails
+            validation_results = []
+            
+            # 1. Basic validation
             if not conversion_result.get("success"):
-                logger.warning("Conversion marked as unsuccessful")
+                validation_results.append("Conversion marked as unsuccessful")
             
             if not conversion_result.get("target_rule"):
-                logger.warning("No target rule generated")
+                validation_results.append("No target rule generated")
                 conversion_result["success"] = False
                 conversion_result["error_message"] = "No target rule generated"
             
-            # Validate confidence score
+            # 2. Confidence score validation
             confidence = conversion_result.get("confidence_score", 0.0)
             if confidence < 0.3:
-                logger.warning(f"Low confidence score: {confidence}")
+                validation_results.append(f"Low confidence score: {confidence}")
+            
+            # 3. KustoQL-specific validation
+            if (request.target_format.value == "kustoql" and 
+                conversion_result.get("success") and 
+                conversion_result.get("target_rule")):
+                
+                # Use enhanced LLM validation
+                kusto_validation = await enhanced_llm_service.validate_kusto_query(
+                    conversion_result["target_rule"]
+                )
+                
+                if not kusto_validation.get("is_valid", True):
+                    validation_results.extend(kusto_validation.get("errors", []))
+                    conversion_result["validation_errors"] = kusto_validation.get("errors", [])
+                    conversion_result["suggestions"] = kusto_validation.get("suggestions", [])
+                    
+                    # If critical errors, mark as failed
+                    critical_errors = ["Query is empty", "No query lines found"]
+                    if any(error in kusto_validation.get("errors", []) for error in critical_errors):
+                        conversion_result["success"] = False
+                        conversion_result["error_message"] = "Critical KustoQL validation errors"
+            
+            # 4. Field mapping validation
+            field_names = state.get("context_data", {}).get("field_names", [])
+            if field_names and conversion_result.get("target_rule"):
+                # Check if at least some fields were mapped
+                target_rule = conversion_result["target_rule"].lower()
+                mapped_fields = 0
+                for field in field_names:
+                    if field.lower() in target_rule:
+                        mapped_fields += 1
+                
+                if mapped_fields == 0:
+                    validation_results.append("No field mappings found in target rule")
+                    conversion_result["confidence_score"] = max(0.0, confidence - 0.2)
+                elif mapped_fields < len(field_names) * 0.5:
+                    validation_results.append(f"Only {mapped_fields}/{len(field_names)} fields mapped")
+                    conversion_result["confidence_score"] = max(0.0, confidence - 0.1)
+            
+            # 5. Table validation for KustoQL
+            if (request.target_format.value == "kustoql" and 
+                conversion_result.get("target_rule")):
+                
+                recommended_table = state.get("context_data", {}).get("recommended_table")
+                if recommended_table:
+                    if recommended_table not in conversion_result["target_rule"]:
+                        validation_results.append(f"Recommended table '{recommended_table}' not used in query")
+                        conversion_result["confidence_score"] = max(0.0, confidence - 0.1)
+            
+            # 6. NO MAPPING validation
+            if "NO MAPPING" in str(conversion_result):
+                validation_results.append("Model indicated insufficient context for mapping")
+                conversion_result["success"] = False
+                conversion_result["error_message"] = "Insufficient context for reliable mapping"
+            
+            # Store validation results
+            if validation_results:
+                conversion_result["validation_warnings"] = validation_results
+                logger.warning(f"Validation warnings: {validation_results}")
             
             state["conversion_result"] = conversion_result
-            logger.info("Validation completed")
+            logger.info(f"Enhanced validation completed with {len(validation_results)} warnings")
             
         except Exception as e:
             logger.error(f"Failed to validate result: {e}")
@@ -467,9 +488,16 @@ class ConversionWorkflow:
     async def _initialize_services(self) -> None:
         """Initialize all required services."""
         try:
+            logger.info("Initializing conversion services")
+            
+            # Initialize services
             await embedding_service.initialize()
             await chromadb_service.initialize()
             await llm_service.initialize()
+            await enhanced_llm_service.initialize()
+            await hybrid_retrieval_service.initialize()
+            
+            logger.info("All conversion services initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize services: {e}")
             raise
