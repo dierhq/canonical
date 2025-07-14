@@ -15,6 +15,7 @@ Data ingestion script for Azure Sentinel detection rules and hunting queries.
 import asyncio
 import os
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import git
@@ -395,8 +396,8 @@ class AzureSentinelIngestion:
                     query_period=data.get("queryPeriod"),
                     trigger_operator=data.get("triggerOperator"),
                     trigger_threshold=data.get("triggerThreshold"),
-                    tactics=data.get("tactics", []),
-                    techniques=data.get("techniques", []),
+                    tactics=data.get("tactics") or [],
+                    techniques=data.get("techniques") or [],
                     display_name=data.get("displayName"),
                     enabled=data.get("enabled", True),
                     suppression_enabled=data.get("suppressionEnabled", False),
@@ -404,7 +405,7 @@ class AzureSentinelIngestion:
                     event_grouping=data.get("eventGroupingSettings"),
                     alert_details_override=data.get("alertDetailsOverride"),
                     custom_details=data.get("customDetails"),
-                    entity_mappings=data.get("entityMappings", []),
+                    entity_mappings=data.get("entityMappings") or [],
                     author=data.get("author"),
                     created_date=data.get("createdDate"),
                     last_modified=data.get("lastModified"),
@@ -799,10 +800,10 @@ class AzureSentinelIngestion:
                 name=data.get("name", file_path.stem),
                 description=data.get("description", ""),
                 query=data.get("query", ""),
-                data_types=data.get("dataTypes", []),
-                tactics=data.get("tactics", []),
-                techniques=data.get("techniques", []),
-                required_data_connectors=data.get("requiredDataConnectors", []),
+                data_types=data.get("dataTypes") or [],
+                tactics=data.get("tactics") or [],
+                techniques=data.get("techniques") or [],
+                required_data_connectors=data.get("requiredDataConnectors") or [],
                 author=data.get("author"),
                 created_date=data.get("createdDate"),
                 last_modified=data.get("lastModified"),

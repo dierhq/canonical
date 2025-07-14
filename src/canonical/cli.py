@@ -26,6 +26,7 @@ from .data_ingestion.sigma_ingestion import sigma_ingestion
 from .data_ingestion.mitre_ingestion import mitre_ingestion
 from .data_ingestion.car_ingestion import car_ingestion
 from .data_ingestion.atomic_ingestion import atomic_ingestion
+from .data_ingestion.azure_sentinel_ingestion import AzureSentinelIngestion
 from .data_ingestion.all_ingestion import ingest_all_data
 
 
@@ -395,6 +396,85 @@ def ingest_all(force_refresh: bool):
             
         except Exception as e:
             click.echo(f"❌ Ingestion failed: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of repository')
+def ingest_azure_sentinel(force_refresh: bool):
+    """Ingest Azure Sentinel detection rules and hunting queries."""
+    async def _ingest():
+        try:
+            click.echo("Starting Azure Sentinel ingestion...")
+            
+            azure_ingestion = AzureSentinelIngestion()
+            stats = await azure_ingestion.ingest_all(force_refresh=force_refresh)
+            
+            click.echo(f"✅ Ingestion completed:")
+            click.echo(f"  Detection rules: {stats.get('detections', {}).get('successful', 0)}")
+            click.echo(f"  Hunting queries: {stats.get('hunting', {}).get('successful', 0)}")
+            click.echo(f"  Total successful: {stats.get('detections', {}).get('successful', 0) + stats.get('hunting', {}).get('successful', 0)}")
+            click.echo(f"  Total failed: {stats.get('detections', {}).get('failed', 0) + stats.get('hunting', {}).get('failed', 0)}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            logger.error(f"Ingestion error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of repository')
+def ingest_azure_detections(force_refresh: bool):
+    """Ingest Azure Sentinel detection rules only."""
+    async def _ingest():
+        try:
+            click.echo("Starting Azure Sentinel detection rules ingestion...")
+            
+            azure_ingestion = AzureSentinelIngestion()
+            if force_refresh:
+                await azure_ingestion._update_repository(force_refresh=True)
+            
+            stats = await azure_ingestion.ingest_detections()
+            
+            click.echo(f"✅ Detection rules ingestion completed:")
+            click.echo(f"  Total files: {stats.get('total_files', 0)}")
+            click.echo(f"  Successful: {stats.get('successful', 0)}")
+            click.echo(f"  Failed: {stats.get('failed', 0)}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            logger.error(f"Ingestion error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of repository')
+def ingest_azure_hunting(force_refresh: bool):
+    """Ingest Azure Sentinel hunting queries only."""
+    async def _ingest():
+        try:
+            click.echo("Starting Azure Sentinel hunting queries ingestion...")
+            
+            azure_ingestion = AzureSentinelIngestion()
+            if force_refresh:
+                await azure_ingestion._update_repository(force_refresh=True)
+            
+            stats = await azure_ingestion.ingest_hunting_queries()
+            
+            click.echo(f"✅ Hunting queries ingestion completed:")
+            click.echo(f"  Total files: {stats.get('total_files', 0)}")
+            click.echo(f"  Successful: {stats.get('successful', 0)}")
+            click.echo(f"  Failed: {stats.get('failed', 0)}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            logger.error(f"Ingestion error: {e}")
             sys.exit(1)
     
     asyncio.run(_ingest())

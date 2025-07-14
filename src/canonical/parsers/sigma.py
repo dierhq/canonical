@@ -56,6 +56,15 @@ class SigmaParser:
             if "detection" not in rule_dict:
                 raise ValueError("Rule must have a 'detection' field")
             
+            # Convert date objects to strings if needed
+            date_value = rule_dict.get("date")
+            if date_value is not None and not isinstance(date_value, str):
+                date_value = str(date_value)
+            
+            modified_value = rule_dict.get("modified")
+            if modified_value is not None and not isinstance(modified_value, str):
+                modified_value = str(modified_value)
+            
             # Create SigmaRule object
             sigma_rule = SigmaRule(
                 title=rule_dict["title"],
@@ -63,8 +72,8 @@ class SigmaParser:
                 status=rule_dict.get("status"),
                 description=rule_dict.get("description"),
                 author=rule_dict.get("author"),
-                date=rule_dict.get("date"),
-                modified=rule_dict.get("modified"),
+                date=date_value,
+                modified=modified_value,
                 tags=rule_dict.get("tags", []),
                 logsource=rule_dict.get("logsource", {}),
                 detection=rule_dict.get("detection", {}),
@@ -81,22 +90,37 @@ class SigmaParser:
             raise ValueError(f"Failed to parse Sigma rule: {e}")
     
     def extract_mitre_tags(self, rule: SigmaRule) -> List[str]:
-        """Extract MITRE ATT&CK technique IDs from rule tags.
+        """Extract MITRE ATT&CK technique IDs, tactic names, software IDs, and group IDs from rule tags.
         
         Args:
             rule: Parsed Sigma rule
             
         Returns:
-            List of MITRE technique IDs
+            List of MITRE technique IDs, tactic names, software IDs, and group IDs
         """
         mitre_tags = []
-        mitre_pattern = re.compile(r'attack\.t\d{4}(?:\.\d{3})?', re.IGNORECASE)
+        mitre_technique_pattern = re.compile(r'attack\.t\d{4}(?:\.\d{3})?', re.IGNORECASE)
+        mitre_tactic_pattern = re.compile(r'attack\.(initial-access|execution|persistence|privilege-escalation|defense-evasion|credential-access|discovery|lateral-movement|collection|command-and-control|exfiltration|impact|reconnaissance|resource-development)', re.IGNORECASE)
+        mitre_software_pattern = re.compile(r'attack\.s\d{4}', re.IGNORECASE)
+        mitre_group_pattern = re.compile(r'attack\.g\d{4}', re.IGNORECASE)
         
         for tag in rule.tags:
-            if mitre_pattern.match(tag):
+            if mitre_technique_pattern.match(tag):
                 # Extract technique ID (e.g., "attack.t1059.001" -> "T1059.001")
                 technique_id = tag.replace("attack.", "").upper()
                 mitre_tags.append(technique_id)
+            elif mitre_tactic_pattern.match(tag):
+                # Extract tactic name (e.g., "attack.initial-access" -> "initial-access")
+                tactic_name = tag.replace("attack.", "")
+                mitre_tags.append(tactic_name)
+            elif mitre_software_pattern.match(tag):
+                # Extract software ID (e.g., "attack.s0005" -> "S0005")
+                software_id = tag.replace("attack.", "").upper()
+                mitre_tags.append(software_id)
+            elif mitre_group_pattern.match(tag):
+                # Extract group ID (e.g., "attack.g0069" -> "G0069")
+                group_id = tag.replace("attack.", "").upper()
+                mitre_tags.append(group_id)
         
         return mitre_tags
     
@@ -301,10 +325,14 @@ class SigmaParser:
                        rule.logsource.get("service")]):
                 errors.append("Logsource must specify at least one of: category, product, service")
         
-        # Check MITRE tags format
-        mitre_pattern = re.compile(r'attack\.t\d{4}(?:\.\d{3})?$', re.IGNORECASE)
+        # Check MITRE tags format (allow technique IDs, tactic names, software IDs, and group IDs)
+        mitre_technique_pattern = re.compile(r'attack\.t\d{4}(?:\.\d{3})?$', re.IGNORECASE)
+        mitre_tactic_pattern = re.compile(r'attack\.(initial-access|execution|persistence|privilege-escalation|defense-evasion|credential-access|discovery|lateral-movement|collection|command-and-control|exfiltration|impact|reconnaissance|resource-development)$', re.IGNORECASE)
+        mitre_software_pattern = re.compile(r'attack\.s\d{4}$', re.IGNORECASE)
+        mitre_group_pattern = re.compile(r'attack\.g\d{4}$', re.IGNORECASE)
+        
         for tag in rule.tags:
-            if tag.startswith("attack.") and not mitre_pattern.match(tag):
+            if tag.startswith("attack.") and not (mitre_technique_pattern.match(tag) or mitre_tactic_pattern.match(tag) or mitre_software_pattern.match(tag) or mitre_group_pattern.match(tag)):
                 errors.append(f"Invalid MITRE tag format: {tag}")
         
         return len(errors) == 0, errors
