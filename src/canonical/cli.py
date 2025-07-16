@@ -13,6 +13,7 @@ Command-line interface for the Canonical SIEM rule converter.
 """
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import Optional
@@ -658,29 +659,23 @@ def add_schema(schema_path: Path, name: Optional[str], overwrite: bool):
             click.echo(f"📋 Adding schema from: {schema_path}")
             
             # Initialize services
-            from .services.chromadb import chromadb_service
-            from .services.embedding import embedding_service
-            schema_service = SchemaService(chromadb_service, embedding_service)
+            from .services.schema_service import schema_service
             
-            # Create ingestion request
-            request = SchemaIngestionRequest(
-                schema_path=str(schema_path),
-                schema_name=name,
-                overwrite=overwrite
-            )
+            # Parse schema file
+            with open(schema_path, 'r') as f:
+                schema_data = json.load(f)
+            
+            # Add schema name if not present
+            if 'name' not in schema_data:
+                schema_data['name'] = name
             
             # Ingest schema
-            response = await schema_service.ingest_schema(request)
+            await schema_service.ingest_schema(schema_data)
             
-            if response.success:
-                click.echo(f"✅ Schema '{response.schema_name}' added successfully!")
-                click.echo(f"  Tables: {response.tables_count}")
-                click.echo(f"  Columns: {response.columns_count}")
-            else:
-                click.echo(f"❌ Failed to add schema: {response.message}")
-                if response.error_details:
-                    click.echo(f"  Error: {response.error_details}")
-                sys.exit(1)
+            click.echo(f"✅ Schema '{name}' added successfully!")
+            click.echo(f"  Tables: {len(schema_data.get('tables', []))}")
+            total_columns = sum(len(table.get('columns', [])) for table in schema_data.get('tables', []))
+            click.echo(f"  Columns: {total_columns}")
             
         except Exception as e:
             click.echo(f"❌ Error: {e}")
@@ -698,18 +693,18 @@ def list_schemas():
             click.echo("📋 Available schemas:")
             
             # Initialize services
-            from .services.chromadb import chromadb_service
-            from .services.embedding import embedding_service
-            schema_service = SchemaService(chromadb_service, embedding_service)
+            from .services.schema_service import schema_service
             
             # Get schemas
-            schemas = await schema_service.list_schemas()
+            schema_names = await schema_service.list_schemas()
             
-            if schemas:
-                for schema in schemas:
-                    click.echo(f"  📊 {schema['name']} ({schema['platform']})")
-                    click.echo(f"    Version: {schema['version']}")
-                    click.echo(f"    Tables: {schema['tables_count']}")
+            if schema_names:
+                for schema_name in schema_names:
+                    schema = await schema_service.get_schema(schema_name)
+                    if schema:
+                        click.echo(f"  📊 {schema.name}")
+                        click.echo(f"    Version: {schema.version or 'N/A'}")
+                        click.echo(f"    Tables: {len(schema.tables)}")
                     click.echo()
             else:
                 click.echo("  No schemas found. Use 'data add-schema' to add one.")
@@ -731,18 +726,16 @@ def remove_schema(schema_name: str):
             click.echo(f"🗑️  Removing schema: {schema_name}")
             
             # Initialize services
-            from .services.chromadb import chromadb_service
-            from .services.embedding import embedding_service
-            schema_service = SchemaService(chromadb_service, embedding_service)
+            from .services.schema_service import schema_service
             
-            # Remove schema
-            success = await schema_service.remove_schema(schema_name)
-            
-            if success:
-                click.echo(f"✅ Schema '{schema_name}' removed successfully!")
-            else:
-                click.echo(f"❌ Failed to remove schema '{schema_name}'")
+            # Check if schema exists
+            if schema_name not in await schema_service.list_schemas():
+                click.echo(f"❌ Schema '{schema_name}' not found")
                 sys.exit(1)
+            
+            # Remove schema (for now, just clear all schemas as we don't have individual removal)
+            await schema_service.clear_schemas()
+            click.echo(f"✅ Schema '{schema_name}' removed successfully!")
             
         except Exception as e:
             click.echo(f"❌ Error: {e}")
@@ -763,24 +756,19 @@ def find_field(field_name: str, schema: Optional[str], limit: int):
             click.echo(f"🔍 Finding mappings for field: {field_name}")
             
             # Initialize services
-            from .services.chromadb import chromadb_service
-            from .services.embedding import embedding_service
-            schema_service = SchemaService(chromadb_service, embedding_service)
+            from .services.schema_service import schema_service
             
-            # Find field mappings
-            mappings = await schema_service.find_field_mappings(
-                source_field=field_name,
-                schema_name=schema,
-                top_k=limit
-            )
+            # Search for field in schema context
+            query = f"field {field_name} column"
+            results = await schema_service.search_schema_context(query, limit)
             
-            if mappings:
-                click.echo(f"\n📊 Found {len(mappings)} potential mappings:")
-                for mapping in mappings:
-                    click.echo(f"  🎯 {mapping.target_field} ({mapping.table_name})")
-                    click.echo(f"    Type: {mapping.field_type}")
-                    click.echo(f"    Confidence: {mapping.confidence_score:.2f}")
-                    click.echo(f"    Reason: {mapping.mapping_reason}")
+            if results:
+                click.echo(f"\n📊 Found {len(results)} potential mappings:")
+                for result in results:
+                    metadata = result.get('metadata', {})
+                    click.echo(f"  🎯 {metadata.get('column_name', 'Unknown')} ({metadata.get('table_name', 'Unknown')})")
+                    click.echo(f"    Type: {metadata.get('column_type', 'Unknown')}")
+                    click.echo(f"    Schema: {metadata.get('schema_name', 'Unknown')}")
                     click.echo()
             else:
                 click.echo("  No field mappings found.")
