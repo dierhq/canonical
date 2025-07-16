@@ -401,10 +401,14 @@ class AzureSentinelIngestion:
                 if not isinstance(data, dict):
                     return None
                 
+                # Fix version field - convert numeric versions to strings
+                if "version" in data and isinstance(data["version"], (int, float)):
+                    data["version"] = str(data["version"])
+                
                 # Extract detection rule fields
                 detection = AzureSentinelDetection(
                     rule_id=data.get("id"),
-                    name=data.get("name", ""),
+                    name=data.get("name", data.get("displayName", file_path.stem)),
                     description=data.get("description", ""),
                     severity=data.get("severity", "Medium"),
                     query=data.get("query", ""),
@@ -826,9 +830,13 @@ class AzureSentinelIngestion:
             if not isinstance(data, dict):
                 return None
             
+            # Fix version field - convert numeric versions to strings
+            if "version" in data and isinstance(data["version"], (int, float)):
+                data["version"] = str(data["version"])
+            
             hunting_query = AzureSentinelHuntingQuery(
                 query_id=data.get("id"),
-                name=data.get("name", file_path.stem),
+                name=data.get("name", data.get("displayName", file_path.stem)),
                 description=data.get("description", ""),
                 query=data.get("query", ""),
                 data_types=data.get("dataTypes") or [],

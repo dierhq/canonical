@@ -20,6 +20,9 @@ from .mitre_ingestion import mitre_ingestion
 from .car_ingestion import car_ingestion
 from .atomic_ingestion import atomic_ingestion
 from .azure_sentinel_ingestion import azure_sentinel_ingestion
+from .sigma_ingestion import sigma_ingestion
+from .azure_docs_ingestion import ingest_azure_docs
+from .qradar_docs_ingestion import qradar_docs_ingestion
 
 
 async def ingest_all_data(force_refresh: bool = False) -> Dict[str, Any]:
@@ -51,10 +54,25 @@ async def ingest_all_data(force_refresh: bool = False) -> Dict[str, Any]:
         atomic_stats = await atomic_ingestion.ingest_atomic_data(force_refresh)
         results["atomic_red_team"] = atomic_stats
         
+        # Ingest Sigma Rules data
+        logger.info("Starting Sigma Rules ingestion...")
+        sigma_stats = await sigma_ingestion.ingest_sigma_rules(force_refresh)
+        results["sigma_rules"] = sigma_stats
+        
         # Ingest Azure Sentinel data
         logger.info("Starting Azure Sentinel ingestion...")
         azure_stats = await azure_sentinel_ingestion.ingest_all(force_refresh)
         results["azure_sentinel"] = azure_stats
+        
+        # Ingest Azure Sentinel Documentation
+        logger.info("Starting Azure Sentinel documentation ingestion...")
+        azure_docs_success = await ingest_azure_docs(force_refresh)
+        results["azure_docs"] = {"success": azure_docs_success}
+        
+        # Ingest QRadar Documentation
+        logger.info("Starting QRadar documentation ingestion...")
+        qradar_docs_stats = await qradar_docs_ingestion.ingest_qradar_docs(force_refresh)
+        results["qradar_docs"] = qradar_docs_stats
         
         logger.info("All data ingestion completed successfully")
         logger.info(f"Final statistics: {results}")
