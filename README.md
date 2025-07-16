@@ -75,6 +75,16 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 - **Batch Processing**: Convert large QRadar rule sets efficiently
 - **Validation & Quality**: Rule syntax checking and confidence scoring
 
+### 🎯 **BYOI (Bring Your Own Indices) - Schema-Aware Conversion** - **🆕 NEW**
+- **Schema Ingestion**: Upload JSON schema files describing your environment's tables and columns
+- **Intelligent Field Mapping**: Semantic field mapping with confidence scores using vector similarity
+- **Environment-Specific Conversion**: Rules tailored to your specific data schema and field names
+- **Post-Conversion Validation**: Automatic validation against your environment schema
+- **Field Coverage Analysis**: Detailed analysis of field usage and mapping success rates
+- **Alternative Field Suggestions**: Smart suggestions for unmapped fields based on schema similarity
+- **Schema-Aware LLM Enhancement**: Context-rich prompts with environment-specific field mappings
+- **Multi-Format Support**: Works with Sigma, QRadar, KibanaQL, and ES|QL source formats
+
 ### 🚀 **Enterprise-Ready**
 - **REST API**: Full API server with OpenAPI documentation
 - **CLI Interface**: Command-line tools for batch processing
@@ -133,6 +143,9 @@ python3 -m src.canonical.cli convert kibana_rule.json kustoql --source-format ki
 # Convert KibanaQL rule to Sigma
 python3 -m src.canonical.cli convert kibana_rule.json sigma --source-format kibanaql
 
+# BYOI - Schema-aware conversion with environment-specific field mappings
+python3 -m src.canonical.cli convert-with-schema rule.yml kustoql --schema-name azuresentinel_table
+
 # Batch convert multiple rules
 python3 -m src.canonical.cli batch-convert ./rules/ kustoql --output-dir ./converted/
 
@@ -176,6 +189,11 @@ curl -X POST "http://localhost:8000/ingest/azure-sentinel" \
 curl -X POST "http://localhost:8000/validate" \
   -H "Content-Type: application/json" \
   -d '{"rule": "KibanaQL rule content", "source_format": "kibanaql"}'
+
+# BYOI - Schema-aware conversion with environment-specific field mappings
+curl -X POST "http://localhost:8000/convert-with-schema" \
+  -H "Content-Type: application/json" \
+  -d '{"rule": "rule content", "source_format": "sigma", "target_format": "kustoql", "schema_name": "azuresentinel_table"}'
 ```
 
 #### Example Conversions
@@ -336,6 +354,63 @@ async def convert_kibanaql_to_sigma():
 asyncio.run(convert_kibanaql_to_sigma())
 ```
 
+**BYOI - Schema-Aware Conversion:**
+```python
+import asyncio
+from src.canonical.core.converter import RuleConverter
+
+async def convert_with_schema():
+    converter = RuleConverter()
+    await converter.initialize()
+    
+    # First, ingest your environment schema
+    from src.canonical.services.schema_service import SchemaService
+    schema_service = SchemaService()
+    
+    # Example schema for Azure Sentinel environment
+    schema_data = {
+        "name": "azuresentinel_table",
+        "tables": [
+            {
+                "name": "SecurityEvent",
+                "columns": [
+                    {"name": "EventID", "type": "int", "description": "Windows event ID"},
+                    {"name": "ProcessName", "type": "string", "description": "Process executable name"},
+                    {"name": "CommandLine", "type": "string", "description": "Command line arguments"},
+                    {"name": "SourceIP", "type": "string", "description": "Source IP address"},
+                    {"name": "DestinationPort", "type": "int", "description": "Destination port number"}
+                ]
+            }
+        ]
+    }
+    
+    await schema_service.ingest_schema(schema_data)
+    
+    # Convert rule with schema awareness
+    sigma_rule = """
+    title: Suspicious PowerShell Execution
+    detection:
+        selection:
+            Image|endswith: 'powershell.exe'
+            CommandLine|contains: 'EncodedCommand'
+        condition: selection
+    """
+    
+    result = await converter.convert_with_schema(
+        source_rule=sigma_rule,
+        source_format="sigma",
+        target_format="kustoql",
+        schema_name="azuresentinel_table"
+    )
+    
+    print(f"Converted Rule: {result.target_rule}")
+    print(f"Confidence: {result.confidence_score}")
+    print(f"Field Mappings: {result.metadata.get('field_mappings', {})}")
+    print(f"Schema Validation: {result.metadata.get('schema_validation', {})}")
+
+asyncio.run(convert_with_schema())
+```
+
 ## 📚 Documentation
 
 ### 📖 Core Documentation
@@ -353,6 +428,7 @@ asyncio.run(convert_kibanaql_to_sigma())
 ### 🎓 Examples and Tutorials
 - [Basic Usage Examples](examples/) - Simple conversion examples
 - [QRadar to KustoQL Migration](examples/qradar_to_kustoql_example.py) - QRadar migration example
+- [BYOI Schema-Aware Conversion](examples/byoi_schema_example.py) - Environment-specific conversion guide
 - [Integration Patterns](docs/integration.md) - Common integration scenarios
 - [Custom Extensions](docs/extensions.md) - Building custom converters
 - [QRadar Migration Guide](docs/qradar-migration.md) - Complete migration workflow

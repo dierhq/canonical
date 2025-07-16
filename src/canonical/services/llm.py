@@ -200,6 +200,18 @@ index=security EventCode=4688 Image="*powershell.exe" CommandLine="*EncodedComma
                 context_info += f"\nMITRE ATT&CK Techniques: {', '.join(context['mitre_techniques'])}"
             if "similar_rules" in context:
                 context_info += f"\nSimilar rules found: {len(context['similar_rules'])}"
+            if "schema_field_mappings" in context:
+                schema_mappings = context["schema_field_mappings"]
+                if schema_mappings:
+                    context_info += f"\n\nSchema-Aware Field Mappings:"
+                    if "schema_name" in context and context["schema_name"]:
+                        context_info += f"\nTarget Environment: {context['schema_name']}"
+                    for field_ref, mappings in schema_mappings.items():
+                        context_info += f"\n  '{field_ref}' -> Suggested fields:"
+                        for mapping in mappings[:3]:  # Show top 3 mappings
+                            context_info += f"\n    - {mapping['field_name']} (confidence: {mapping['confidence']:.2f})"
+                            if mapping.get('description'):
+                                context_info += f" - {mapping['description']}"
         
         prompt = f"""You are an expert SIEM rule converter. Convert the following Sigma rule to {format_descriptions[target_format]}.
 
@@ -216,10 +228,11 @@ Target Format: {target_format.value.upper()}
 Instructions:
 1. Analyze the Sigma rule structure and detection logic
 2. Map Sigma fields to the target format's field names
-3. Convert conditions and operators appropriately
-4. Maintain the detection logic and intent
-5. Provide a confidence score (0.0-1.0)
-6. Explain the conversion process
+3. **IMPORTANT**: If schema-aware field mappings are provided above, prioritize using those field names for better environment compatibility
+4. Convert conditions and operators appropriately
+5. Maintain the detection logic and intent
+6. Provide a confidence score (0.0-1.0) - higher if schema mappings were used
+7. Explain the conversion process and mention any schema-aware field mappings used
 
 Respond in the following JSON format:
 {{
@@ -424,6 +437,19 @@ Response:"""
             if "similar_rules" in context:
                 context_info += f"\nSimilar rules found: {len(context['similar_rules'])}"
             
+            if "schema_field_mappings" in context:
+                schema_mappings = context["schema_field_mappings"]
+                if schema_mappings:
+                    context_info += f"\n\nSchema-Aware Field Mappings:"
+                    if "schema_name" in context and context["schema_name"]:
+                        context_info += f"\nTarget Environment: {context['schema_name']}"
+                    for field_ref, mappings in schema_mappings.items():
+                        context_info += f"\n  '{field_ref}' -> Suggested fields:"
+                        for mapping in mappings[:3]:  # Show top 3 mappings
+                            context_info += f"\n    - {mapping['field_name']} (confidence: {mapping['confidence']:.2f})"
+                            if mapping.get('description'):
+                                context_info += f" - {mapping['description']}"
+            
             if "azure_sentinel_examples" in context:
                 azure_examples = "\n\nRelevant Azure Sentinel Examples:\n"
                 for i, example in enumerate(context["azure_sentinel_examples"][:3]):  # Limit to 3 examples
@@ -480,13 +506,14 @@ KustoQL Table Selection Guidelines:
 Instructions:
 1. Analyze the QRadar rule structure and detection logic
 2. Map QRadar fields to appropriate KustoQL table fields
-3. Convert QRadar operators to KustoQL operators
-4. Handle time windows and aggregations appropriately
-5. Select the most appropriate KustoQL table(s)
-6. Maintain the detection logic and intent
-7. Use proper KustoQL syntax and functions
-8. Provide a confidence score (0.0-1.0)
-9. Explain the conversion process and any assumptions made
+3. **IMPORTANT**: If schema-aware field mappings are provided above, prioritize using those field names for better environment compatibility
+4. Convert QRadar operators to KustoQL operators
+5. Handle time windows and aggregations appropriately
+6. Select the most appropriate KustoQL table(s)
+7. Maintain the detection logic and intent
+8. Use proper KustoQL syntax and functions
+9. Provide a confidence score (0.0-1.0) - higher if schema mappings were used
+10. Explain the conversion process, mention any schema-aware field mappings used, and any assumptions made
 
 Respond in the following JSON format:
 {{

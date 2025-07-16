@@ -25,6 +25,8 @@ from ..services.chromadb import chromadb_service
 from ..services.llm import llm_service
 from ..services.enhanced_llm import enhanced_llm_service
 from ..services.hybrid_retrieval import hybrid_retrieval_service
+from ..services.schema_service import schema_service
+from ..services.validation_service import validation_service
 
 
 class ConversionState(TypedDict):
@@ -211,6 +213,46 @@ class ConversionWorkflow:
                 target_format=request.target_format.value
             )
             
+            # Add schema-aware field mappings if available
+            try:
+                
+                # Get schema name from request context if provided
+                schema_name = None
+                if request.context and "schema_name" in request.context:
+                    schema_name = request.context["schema_name"]
+                
+                # Extract field references from the parsed rule
+                field_references = self._extract_field_references(state.get("parsed_rule", {}))
+                
+                if field_references:
+                    logger.info(f"Found {len(field_references)} field references for schema mapping")
+                    
+                    # Get field mappings from schema service
+                    field_mappings = {}
+                    for field_ref in field_references:
+                        try:
+                            mappings = await schema_service.find_field_mappings(
+                                field_query=field_ref,
+                                schema_name=schema_name,
+                                limit=3
+                            )
+                            if mappings:
+                                field_mappings[field_ref] = mappings
+                                logger.info(f"Found {len(mappings)} mappings for field '{field_ref}'")
+                        except Exception as e:
+                            logger.debug(f"No mappings found for field '{field_ref}': {e}")
+                    
+                    # Add field mappings to context
+                    enhanced_context["schema_field_mappings"] = field_mappings
+                    enhanced_context["schema_name"] = schema_name
+                    
+                    logger.info(f"Added schema-aware field mappings for {len(field_mappings)} fields")
+                
+            except ImportError:
+                logger.debug("Schema service not available, skipping schema-aware enhancements")
+            except Exception as e:
+                logger.warning(f"Failed to add schema-aware context: {e}")
+            
             # Store enhanced context
             state["context_data"] = enhanced_context
             logger.info(f"Enhanced context gathered with {len(enhanced_context.get('field_names', []))} field names")
@@ -281,9 +323,9 @@ class ConversionWorkflow:
         return state
     
     async def _validate_result_node(self, state: ConversionState) -> ConversionState:
-        """Validate the conversion result with enhanced guardrails."""
+        """Validate the conversion result with enhanced guardrails and schema validation."""
         try:
-            logger.info("Validating conversion result with guardrails")
+            logger.info("Validating conversion result with guardrails and schema validation")
             
             if state.get("error"):
                 return state
@@ -297,6 +339,59 @@ class ConversionWorkflow:
             
             # Enhanced validation with guardrails
             validation_results = []
+            
+            # Add schema-based validation if available
+            try:
+                
+                target_rule = conversion_result.get("target_rule")
+                if target_rule:
+                    # Get schema name from context
+                    schema_name = None
+                    if request.context and "schema_name" in request.context:
+                        schema_name = request.context["schema_name"]
+                    
+                    # Get original field mappings from context
+                    original_field_mappings = None
+                    context_data = state.get("context_data", {})
+                    if "schema_field_mappings" in context_data:
+                        original_field_mappings = context_data["schema_field_mappings"]
+                    
+                    # Validate the converted rule against the schema
+                    schema_validation = await validation_service.validate_converted_rule(
+                        converted_rule=target_rule,
+                        target_format=request.target_format.value,
+                        schema_name=schema_name,
+                        original_field_mappings=original_field_mappings
+                    )
+                    
+                    # Add schema validation results to conversion result
+                    conversion_result["schema_validation"] = {
+                        "is_valid": schema_validation.is_valid,
+                        "field_coverage": getattr(schema_validation, 'field_coverage', 0.0),
+                        "issues": getattr(schema_validation, 'issues', []),
+                        "suggestions": getattr(schema_validation, 'suggestions', []),
+                        "validated_fields": getattr(schema_validation, 'validated_fields', []),
+                        "missing_fields": getattr(schema_validation, 'missing_fields', []),
+                        "confidence_score": schema_validation.confidence_score
+                    }
+                    
+                    logger.info(f"Schema validation completed: {schema_validation.field_coverage:.2%} field coverage")
+                    
+                    # Adjust overall confidence based on schema validation
+                    if "confidence" in conversion_result:
+                        original_confidence = conversion_result["confidence"]
+                        schema_confidence = schema_validation.confidence_score
+                        # Weighted average: 70% original, 30% schema validation
+                        adjusted_confidence = (original_confidence * 0.7) + (schema_confidence * 0.3)
+                        conversion_result["confidence"] = adjusted_confidence
+                        conversion_result["confidence_score"] = adjusted_confidence  # Also update confidence_score
+                        logger.info(f"Adjusted confidence from {original_confidence:.2f} to {adjusted_confidence:.2f}")
+                
+            except ImportError:
+                logger.debug("Validation service not available, skipping schema validation")
+            except Exception as e:
+                logger.warning(f"Schema validation failed: {e}")
+                # Continue with basic validation
             
             # 1. Basic validation
             if not conversion_result.get("success"):
@@ -429,6 +524,79 @@ class ConversionWorkflow:
             state["response"] = response
         
         return state
+    
+    def _extract_field_references(self, parsed_rule: Dict[str, Any]) -> List[str]:
+        """Extract field references from parsed rule for schema mapping.
+        
+        Args:
+            parsed_rule: Parsed rule dictionary
+            
+        Returns:
+            List of field references found in the rule
+        """
+        field_references = []
+        
+        if not parsed_rule:
+            return field_references
+        
+        try:
+            # For Sigma rules
+            if "detection" in parsed_rule:
+                detection = parsed_rule["detection"]
+                if isinstance(detection, dict):
+                    for key, value in detection.items():
+                        if key == "condition":
+                            continue
+                        if isinstance(value, dict):
+                            for field_name in value.keys():
+                                # Handle field modifiers (e.g., "Image|endswith")
+                                base_field = field_name.split("|")[0]
+                                if base_field not in field_references:
+                                    field_references.append(base_field)
+            
+            # For QRadar rules
+            elif "conditions" in parsed_rule:
+                conditions = parsed_rule["conditions"]
+                if isinstance(conditions, list):
+                    for condition in conditions:
+                        if isinstance(condition, dict) and "field" in condition:
+                            field_name = condition["field"]
+                            if field_name not in field_references:
+                                field_references.append(field_name)
+            
+            # For KibanaQL rules
+            elif "query" in parsed_rule:
+                query = parsed_rule["query"]
+                if isinstance(query, str):
+                    # Extract field names from query string (basic extraction)
+                    import re
+                    # Look for field patterns like "field_name:" or "field_name ="
+                    field_matches = re.findall(r'(\w+)(?:\s*[:=]|\s+(?:exists|not\s+exists))', query)
+                    for field_match in field_matches:
+                        if field_match not in field_references:
+                            field_references.append(field_match)
+            
+            # Generic field extraction from any rule structure
+            self._extract_fields_recursive(parsed_rule, field_references)
+            
+        except Exception as e:
+            logger.debug(f"Error extracting field references: {e}")
+        
+        return field_references
+    
+    def _extract_fields_recursive(self, obj: Any, field_references: List[str]) -> None:
+        """Recursively extract field references from nested structures."""
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                # Common field indicators
+                if key in ["field", "field_name", "fieldname", "column", "attribute"]:
+                    if isinstance(value, str) and value not in field_references:
+                        field_references.append(value)
+                else:
+                    self._extract_fields_recursive(value, field_references)
+        elif isinstance(obj, list):
+            for item in obj:
+                self._extract_fields_recursive(item, field_references)
     
     async def convert_rule(self, request: ConversionRequest) -> ConversionResponse:
         """Convert a rule using the workflow.

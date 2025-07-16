@@ -29,6 +29,8 @@ from .data_ingestion.atomic_ingestion import atomic_ingestion
 from .data_ingestion.azure_sentinel_ingestion import AzureSentinelIngestion
 from .data_ingestion.qradar_docs_ingestion import qradar_docs_ingestion
 from .data_ingestion.all_ingestion import ingest_all_data
+from .services.schema_service import SchemaService
+from .core.models import SchemaIngestionRequest
 
 
 @click.group()
@@ -76,6 +78,88 @@ def convert(source_file: Path, target_format: str, source_format: str, output: O
                     click.echo(f"\nExplanation: {response.explanation}")
                     if response.mitre_techniques:
                         click.echo(f"MITRE Techniques: {', '.join(response.mitre_techniques)}")
+                
+                # Output converted rule
+                if output:
+                    with open(output, 'w', encoding='utf-8') as f:
+                        f.write(response.target_rule)
+                    click.echo(f"Converted rule saved to: {output}")
+                else:
+                    click.echo("\nConverted Rule:")
+                    click.echo("-" * 40)
+                    click.echo(response.target_rule)
+            else:
+                click.echo(f"❌ Conversion failed: {response.error_message}")
+                sys.exit(1)
+                
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_convert())
+
+
+@cli.command()
+@click.argument('source_file', type=click.Path(exists=True, path_type=Path))
+@click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl', 'sigma']))
+@click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar', 'kibanaql']), help='Source format')
+@click.option('--schema', '-s', help='Schema name for environment-aware conversion')
+@click.option('--output', '-o', type=click.Path(path_type=Path), help='Output file path')
+@click.option('--verbose', '-v', is_flag=True, help='Verbose output')
+@click.option('--show-validation', is_flag=True, help='Show schema validation results')
+def convert_with_schema(source_file: Path, target_format: str, source_format: str, schema: Optional[str], output: Optional[Path], verbose: bool, show_validation: bool):
+    """Convert a rule with schema-aware field mappings."""
+    async def _convert():
+        try:
+            # Read source rule
+            with open(source_file, 'r', encoding='utf-8') as f:
+                source_rule = f.read()
+            
+            # Prepare context with schema information
+            context = {}
+            if schema:
+                context["schema_name"] = schema
+                click.echo(f"Using schema: {schema}")
+            
+            # Convert rule
+            response = await rule_converter.convert_rule(
+                source_rule=source_rule,
+                source_format=SourceFormat(source_format),
+                target_format=TargetFormat(target_format),
+                context=context
+            )
+            
+            if response.success:
+                click.echo(f"✅ Conversion successful (confidence: {response.confidence_score:.2f})")
+                
+                if verbose:
+                    click.echo(f"\nExplanation: {response.explanation}")
+                    if response.mitre_techniques:
+                        click.echo(f"MITRE Techniques: {', '.join(response.mitre_techniques)}")
+                
+                # Show schema validation results if requested
+                if show_validation and response.metadata and "schema_validation" in response.metadata:
+                    validation = response.metadata["schema_validation"]
+                    click.echo(f"\n📊 Schema Validation Results:")
+                    click.echo(f"  Field Coverage: {validation['field_coverage']:.1%}")
+                    click.echo(f"  Valid: {'✅' if validation['is_valid'] else '❌'}")
+                    click.echo(f"  Confidence: {validation['confidence_score']:.2f}")
+                    
+                    if validation['validated_fields']:
+                        click.echo(f"  Validated Fields: {', '.join(validation['validated_fields'])}")
+                    
+                    if validation['missing_fields']:
+                        click.echo(f"  Missing Fields: {', '.join(validation['missing_fields'])}")
+                    
+                    if validation['issues']:
+                        click.echo(f"  Issues:")
+                        for issue in validation['issues']:
+                            click.echo(f"    - {issue}")
+                    
+                    if validation['suggestions']:
+                        click.echo(f"  Suggestions:")
+                        for suggestion in validation['suggestions']:
+                            click.echo(f"    - {suggestion}")
                 
                 # Output converted rule
                 if output:
@@ -561,6 +645,152 @@ def ingest_qradar_docs(force_refresh: bool):
             sys.exit(1)
     
     asyncio.run(_ingest())
+
+
+@data.command()
+@click.argument('schema_path', type=click.Path(exists=True, path_type=Path))
+@click.option('--name', help='Custom schema name')
+@click.option('--overwrite', is_flag=True, help='Overwrite existing schema')
+def add_schema(schema_path: Path, name: Optional[str], overwrite: bool):
+    """Add an environment schema from JSON file."""
+    async def _add_schema():
+        try:
+            click.echo(f"📋 Adding schema from: {schema_path}")
+            
+            # Initialize services
+            from .services.chromadb import chromadb_service
+            from .services.embedding import embedding_service
+            schema_service = SchemaService(chromadb_service, embedding_service)
+            
+            # Create ingestion request
+            request = SchemaIngestionRequest(
+                schema_path=str(schema_path),
+                schema_name=name,
+                overwrite=overwrite
+            )
+            
+            # Ingest schema
+            response = await schema_service.ingest_schema(request)
+            
+            if response.success:
+                click.echo(f"✅ Schema '{response.schema_name}' added successfully!")
+                click.echo(f"  Tables: {response.tables_count}")
+                click.echo(f"  Columns: {response.columns_count}")
+            else:
+                click.echo(f"❌ Failed to add schema: {response.message}")
+                if response.error_details:
+                    click.echo(f"  Error: {response.error_details}")
+                sys.exit(1)
+            
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            logger.error(f"Schema ingestion error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_add_schema())
+
+
+@data.command()
+def list_schemas():
+    """List all available environment schemas."""
+    async def _list_schemas():
+        try:
+            click.echo("📋 Available schemas:")
+            
+            # Initialize services
+            from .services.chromadb import chromadb_service
+            from .services.embedding import embedding_service
+            schema_service = SchemaService(chromadb_service, embedding_service)
+            
+            # Get schemas
+            schemas = await schema_service.list_schemas()
+            
+            if schemas:
+                for schema in schemas:
+                    click.echo(f"  📊 {schema['name']} ({schema['platform']})")
+                    click.echo(f"    Version: {schema['version']}")
+                    click.echo(f"    Tables: {schema['tables_count']}")
+                    click.echo()
+            else:
+                click.echo("  No schemas found. Use 'data add-schema' to add one.")
+            
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            logger.error(f"Schema listing error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_list_schemas())
+
+
+@data.command()
+@click.argument('schema_name')
+def remove_schema(schema_name: str):
+    """Remove an environment schema."""
+    async def _remove_schema():
+        try:
+            click.echo(f"🗑️  Removing schema: {schema_name}")
+            
+            # Initialize services
+            from .services.chromadb import chromadb_service
+            from .services.embedding import embedding_service
+            schema_service = SchemaService(chromadb_service, embedding_service)
+            
+            # Remove schema
+            success = await schema_service.remove_schema(schema_name)
+            
+            if success:
+                click.echo(f"✅ Schema '{schema_name}' removed successfully!")
+            else:
+                click.echo(f"❌ Failed to remove schema '{schema_name}'")
+                sys.exit(1)
+            
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            logger.error(f"Schema removal error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_remove_schema())
+
+
+@data.command()
+@click.argument('field_name')
+@click.option('--schema', help='Limit search to specific schema')
+@click.option('--limit', default=5, help='Maximum number of results')
+def find_field(field_name: str, schema: Optional[str], limit: int):
+    """Find field mappings in environment schemas."""
+    async def _find_field():
+        try:
+            click.echo(f"🔍 Finding mappings for field: {field_name}")
+            
+            # Initialize services
+            from .services.chromadb import chromadb_service
+            from .services.embedding import embedding_service
+            schema_service = SchemaService(chromadb_service, embedding_service)
+            
+            # Find field mappings
+            mappings = await schema_service.find_field_mappings(
+                source_field=field_name,
+                schema_name=schema,
+                top_k=limit
+            )
+            
+            if mappings:
+                click.echo(f"\n📊 Found {len(mappings)} potential mappings:")
+                for mapping in mappings:
+                    click.echo(f"  🎯 {mapping.target_field} ({mapping.table_name})")
+                    click.echo(f"    Type: {mapping.field_type}")
+                    click.echo(f"    Confidence: {mapping.confidence_score:.2f}")
+                    click.echo(f"    Reason: {mapping.mapping_reason}")
+                    click.echo()
+            else:
+                click.echo("  No field mappings found.")
+            
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+            logger.error(f"Field mapping error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_find_field())
 
 
 @cli.command()

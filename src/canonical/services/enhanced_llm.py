@@ -58,8 +58,8 @@ class EnhancedLLMService:
                 
                 return {
                     "success": True,
-                    "target_rule": result.get("converted_rule", ""),
-                    "confidence": result.get("confidence", 0.8),
+                    "target_rule": result.get("target_rule", result.get("converted_rule", "")),
+                    "confidence": result.get("confidence_score", result.get("confidence", 0.8)),
                     "metadata": result.get("metadata", {})
                 }
                 
