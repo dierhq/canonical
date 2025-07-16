@@ -38,6 +38,15 @@ click>=8.1.0
 # BM25 for hybrid retrieval
 rank-bm25>=0.2.2
 
+# PDF processing (for Azure Sentinel docs)
+pymupdf>=1.23.0
+
+# Optional: Mistral AI client (for enhanced processing)
+mistralai>=0.1.0
+
+# Optional: Accelerate for GPU optimization
+accelerate>=0.21.0
+
 # Optional: Jupyter for experimentation
 jupyter>=1.0.0
 matplotlib>=3.7.0

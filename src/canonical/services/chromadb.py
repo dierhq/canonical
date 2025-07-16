@@ -90,6 +90,10 @@ class ChromaDBService:
             {
                 "name": settings.qradar_collection,
                 "description": "QRadar rules and correlation rules"
+            },
+            {
+                "name": settings.qradar_docs_collection,
+                "description": "QRadar documentation and knowledge base"
             }
         ]
         

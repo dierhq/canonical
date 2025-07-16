@@ -27,6 +27,7 @@ from .data_ingestion.mitre_ingestion import mitre_ingestion
 from .data_ingestion.car_ingestion import car_ingestion
 from .data_ingestion.atomic_ingestion import atomic_ingestion
 from .data_ingestion.azure_sentinel_ingestion import AzureSentinelIngestion
+from .data_ingestion.qradar_docs_ingestion import qradar_docs_ingestion
 from .data_ingestion.all_ingestion import ingest_all_data
 
 
@@ -358,7 +359,7 @@ def ingest_atomic(force_refresh: bool):
 @data.command()
 @click.option('--force-refresh', is_flag=True, help='Force refresh of all data')
 def ingest_all(force_refresh: bool):
-    """Ingest all data sources (MITRE ATT&CK, CAR, Atomic Red Team)."""
+    """Ingest all data sources (MITRE ATT&CK, CAR, Atomic Red Team, Sigma Rules, Azure Sentinel, Azure Docs, QRadar Docs)."""
     async def _ingest():
         try:
             click.echo("Starting ingestion of all data sources...")
@@ -393,6 +394,39 @@ def ingest_all(force_refresh: bool):
                 click.echo(f"    Tests: {atomic_stats['tests']}")
                 click.echo(f"    Successful: {atomic_stats['successful']}")
                 click.echo(f"    Failed: {atomic_stats['failed']}")
+            
+            # Display Sigma Rules stats
+            if "sigma_rules" in stats:
+                sigma_stats = stats["sigma_rules"]
+                click.echo(f"\n  Sigma Rules:")
+                click.echo(f"    Total files: {sigma_stats['total_files']}")
+                click.echo(f"    Successful: {sigma_stats['successful']}")
+                click.echo(f"    Failed: {sigma_stats['failed']}")
+            
+            # Display Azure Sentinel stats
+            if "azure_sentinel" in stats:
+                azure_stats = stats["azure_sentinel"]
+                click.echo(f"\n  Azure Sentinel:")
+                if "detections" in azure_stats:
+                    det_stats = azure_stats["detections"]
+                    click.echo(f"    Detections - Total: {det_stats['total_files']}, Successful: {det_stats['successful']}, Failed: {det_stats['failed']}")
+                if "hunting" in azure_stats:
+                    hunt_stats = azure_stats["hunting"]
+                    click.echo(f"    Hunting - Total: {hunt_stats['total_files']}, Successful: {hunt_stats['successful']}, Failed: {hunt_stats['failed']}")
+            
+            # Display Azure Docs stats
+            if "azure_docs" in stats:
+                azure_docs_stats = stats["azure_docs"]
+                click.echo(f"\n  Azure Sentinel Documentation:")
+                click.echo(f"    Status: {'✅ Success' if azure_docs_stats['success'] else '❌ Failed'}")
+            
+            # Display QRadar Docs stats
+            if "qradar_docs" in stats:
+                qradar_stats = stats["qradar_docs"]
+                click.echo(f"\n  QRadar Documentation:")
+                click.echo(f"    Total documents: {qradar_stats['total_documents']}")
+                click.echo(f"    Successful: {qradar_stats['successful']}")
+                click.echo(f"    Failed: {qradar_stats['failed']}")
             
         except Exception as e:
             click.echo(f"❌ Ingestion failed: {e}")
@@ -496,6 +530,30 @@ def ingest_azure_docs():
             else:
                 click.echo("❌ Azure Sentinel documentation ingestion failed!")
                 sys.exit(1)
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            logger.error(f"Ingestion error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of collection')
+def ingest_qradar_docs(force_refresh: bool):
+    """Ingest QRadar documentation from IBM blog post."""
+    async def _ingest():
+        try:
+            click.echo("🚀 Starting QRadar documentation ingestion...")
+            
+            stats = await qradar_docs_ingestion.ingest_qradar_blog_docs(force_refresh=force_refresh)
+            
+            click.echo(f"✅ QRadar documentation ingestion completed:")
+            click.echo(f"  Total documents: {stats['total_documents']}")
+            click.echo(f"  Successful: {stats['successful']}")
+            click.echo(f"  Failed: {stats['failed']}")
+            click.echo(f"  Collection: {stats['collection']}")
             
         except Exception as e:
             click.echo(f"❌ Ingestion failed: {e}")

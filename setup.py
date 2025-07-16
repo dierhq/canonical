@@ -27,11 +27,16 @@ setup(
         "fastapi>=0.104.0",
         "uvicorn>=0.24.0",
         "pydantic>=2.4.0",
+        "pydantic-settings>=2.0.0",
         "loguru>=0.7.2",
         "python-dotenv>=1.0.0",
         "tqdm>=4.66.0",
         "gitpython>=3.1.40",
         "click>=8.1.0",
+        "rank-bm25>=0.2.2",
+        "pymupdf>=1.23.0",
+        "mistralai>=0.1.0",
+        "accelerate>=0.21.0",
     ],
     extras_require={
         "dev": [
