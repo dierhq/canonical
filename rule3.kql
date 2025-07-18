@@ -1,1 +1,0 @@
-(event.dataset: network_traffic.dns or (event.category: (network or network_traffic) and destination.port: 53)) and (event.dataset:zeek.dns or type:dns or event.type:connection) and network.bytes > 60000 

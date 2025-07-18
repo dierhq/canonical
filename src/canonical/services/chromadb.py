@@ -94,6 +94,10 @@ class ChromaDBService:
             {
                 "name": settings.qradar_docs_collection,
                 "description": "QRadar documentation and knowledge base"
+            },
+            {
+                "name": settings.ecs_fields_collection,
+                "description": "ECS (Elastic Common Schema) field reference for EQL/KibanaQL"
             }
         ]
         

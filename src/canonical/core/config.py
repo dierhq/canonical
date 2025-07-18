@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     azure_sentinel_hunting_collection: str = Field(default="azure_sentinel_hunting", env="AZURE_SENTINEL_HUNTING_COLLECTION")
     qradar_collection: str = Field(default="qradar_rules", env="QRADAR_COLLECTION")
     qradar_docs_collection: str = Field(default="qradar_docs", env="QRADAR_DOCS_COLLECTION")
+    ecs_fields_collection: str = Field(default="ecs_fields", env="ECS_FIELDS_COLLECTION")
+    schema_collection: str = Field(default="environment_schemas", env="SCHEMA_COLLECTION")
     
     # Embedding model settings
     embedding_model: str = Field(default="BAAI/bge-large-en-v1.5", env="EMBEDDING_MODEL")

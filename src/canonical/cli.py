@@ -29,7 +29,9 @@ from .data_ingestion.car_ingestion import car_ingestion
 from .data_ingestion.atomic_ingestion import atomic_ingestion
 from .data_ingestion.azure_sentinel_ingestion import AzureSentinelIngestion
 from .data_ingestion.qradar_docs_ingestion import qradar_docs_ingestion
+from .data_ingestion.ecs_ingestion import ecs_ingestion
 from .data_ingestion.all_ingestion import ingest_all_data
+from .data_ingestion.schema_ingestion import schema_ingestion
 from .services.schema_service import SchemaService
 from .core.models import SchemaIngestionRequest
 
@@ -443,7 +445,8 @@ def ingest_atomic(force_refresh: bool):
 
 @data.command()
 @click.option('--force-refresh', is_flag=True, help='Force refresh of all data')
-def ingest_all(force_refresh: bool):
+@click.option('--no-gpu', is_flag=True, help='Disable GPU acceleration (use CPU only)')
+def ingest_all(force_refresh: bool, no_gpu: bool):
     """Ingest all data sources (MITRE ATT&CK, CAR, Atomic Red Team, Sigma Rules, Azure Sentinel, Azure Docs, QRadar Docs)."""
     async def _ingest():
         try:
@@ -696,15 +699,15 @@ def list_schemas():
             from .services.schema_service import schema_service
             
             # Get schemas
-            schema_names = await schema_service.list_schemas()
+            schema_names = schema_service.list_schemas()
             
             if schema_names:
                 for schema_name in schema_names:
-                    schema = await schema_service.get_schema(schema_name)
-                    if schema:
-                        click.echo(f"  📊 {schema.name}")
-                        click.echo(f"    Version: {schema.version or 'N/A'}")
-                        click.echo(f"    Tables: {len(schema.tables)}")
+                    schema_data = schema_service.get_schema(schema_name)
+                    if schema_data:
+                        click.echo(f"  📊 {schema_data.get('name', schema_name)}")
+                        click.echo(f"    Version: {schema_data.get('version', 'N/A')}")
+                        click.echo(f"    Tables: {len(schema_data.get('tables', []))}")
                     click.echo()
             else:
                 click.echo("  No schemas found. Use 'data add-schema' to add one.")
@@ -729,13 +732,17 @@ def remove_schema(schema_name: str):
             from .services.schema_service import schema_service
             
             # Check if schema exists
-            if schema_name not in await schema_service.list_schemas():
+            if schema_name not in schema_service.list_schemas():
                 click.echo(f"❌ Schema '{schema_name}' not found")
                 sys.exit(1)
             
-            # Remove schema (for now, just clear all schemas as we don't have individual removal)
-            await schema_service.clear_schemas()
-            click.echo(f"✅ Schema '{schema_name}' removed successfully!")
+            # Remove schema
+            success = schema_service.remove_schema(schema_name)
+            if success:
+                click.echo(f"✅ Schema '{schema_name}' removed successfully!")
+            else:
+                click.echo(f"❌ Failed to remove schema '{schema_name}'")
+                sys.exit(1)
             
         except Exception as e:
             click.echo(f"❌ Error: {e}")
@@ -758,18 +765,20 @@ def find_field(field_name: str, schema: Optional[str], limit: int):
             # Initialize services
             from .services.schema_service import schema_service
             
-            # Search for field in schema context
-            query = f"field {field_name} column"
-            results = await schema_service.search_schema_context(query, limit)
+            # Search for field mappings
+            results = schema_service.find_field_mappings(field_name)
             
             if results:
-                click.echo(f"\n📊 Found {len(results)} potential mappings:")
-                for result in results:
-                    metadata = result.get('metadata', {})
-                    click.echo(f"  🎯 {metadata.get('column_name', 'Unknown')} ({metadata.get('table_name', 'Unknown')})")
-                    click.echo(f"    Type: {metadata.get('column_type', 'Unknown')}")
-                    click.echo(f"    Schema: {metadata.get('schema_name', 'Unknown')}")
-                    click.echo()
+                total_matches = sum(len(matches) for matches in results.values())
+                click.echo(f"\n📊 Found {total_matches} potential mappings:")
+                for schema_name, matches in results.items():
+                    click.echo(f"\n  Schema: {schema_name}")
+                    for match in matches[:limit]:
+                        click.echo(f"    🎯 {match['table']}.{match['column']}")
+                        click.echo(f"      Type: {match['type']}")
+                        if match.get('description'):
+                            click.echo(f"      Description: {match['description']}")
+                        click.echo()
             else:
                 click.echo("  No field mappings found.")
             
@@ -805,3 +814,141 @@ def main():
 
 if __name__ == "__main__":
     main() 
+
+@data.command()
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of ECS field data')
+def ingest_ecs(force_refresh: bool):
+    """Ingest ECS (Elastic Common Schema) field reference data for EQL/KibanaQL field knowledge."""
+    async def _ingest():
+        try:
+            click.echo("🔍 Starting ECS field reference ingestion...")
+            click.echo("📖 This will scrape Elastic Common Schema documentation")
+            click.echo("   to improve EQL/KibanaQL field knowledge for rule conversion")
+            
+            stats = await ecs_ingestion.ingest_ecs_fields(force_refresh=force_refresh)
+            
+            if stats.get("success", False):
+                click.echo(f"\n✅ ECS field reference ingestion completed:")
+                click.echo(f"   Field Sets: {stats.get('field_sets', 0)}")
+                click.echo(f"   Total Fields: {stats.get('total_fields', 0)}")
+                click.echo(f"   Successfully Ingested: {stats.get('successful', 0)}")
+                click.echo(f"   Failed: {stats.get('failed', 0)}")
+                
+                if stats.get('cached', False):
+                    click.echo(f"   📋 Data was already cached")
+                
+                click.echo(f"\n💡 ECS fields are now available for EQL/KibanaQL field mapping!")
+                click.echo(f"   Collection: ecs_fields")
+                
+            else:
+                click.echo(f"❌ ECS field reference ingestion failed: {stats.get('error', 'Unknown error')}")
+                sys.exit(1)
+                
+        except Exception as e:
+            click.echo(f"❌ ECS ingestion failed: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh and overwrite existing schemas')
+def ingest_schemas(force_refresh: bool):
+    """Ingest all environment schemas from the schemas directory."""
+    async def _ingest():
+        try:
+            click.echo("📋 Starting schema ingestion from schemas directory...")
+            
+            stats = await schema_ingestion.ingest_all_schemas(force_refresh=force_refresh)
+            
+            if stats.get("success", False):
+                click.echo(f"✅ Schema ingestion completed:")
+                click.echo(f"  Total files: {stats['total_files']}")
+                click.echo(f"  Successful: {stats['successful']}")
+                click.echo(f"  Failed: {stats['failed']}")
+                
+                if stats.get('results'):
+                    click.echo("\n📊 Results:")
+                    for result in stats['results']:
+                        file_name = result['file']
+                        file_result = result['result']
+                        if file_result.get('success', False):
+                            schema_name = file_result.get('schema_name', 'Unknown')
+                            tables = file_result.get('tables', 0)
+                            columns = file_result.get('total_columns', 0)
+                            click.echo(f"  ✅ {file_name} → {schema_name} ({tables} tables, {columns} columns)")
+                        else:
+                            error = file_result.get('error', 'Unknown error')
+                            click.echo(f"  ❌ {file_name} → {error}")
+            else:
+                error = stats.get('error', 'Unknown error')
+                click.echo(f"❌ Schema ingestion failed: {error}")
+                sys.exit(1)
+                
+        except Exception as e:
+            click.echo(f"❌ Schema ingestion failed: {e}")
+            logger.error(f"Schema ingestion error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+
+@data.command()
+@click.argument('query')
+@click.option('--limit', default=5, help='Maximum number of results')
+def search_schema_fields(query: str, limit: int):
+    """Search schema fields semantically for field mapping."""
+    async def _search():
+        try:
+            click.echo(f"🔍 Searching schema fields for: '{query}'")
+            
+            results = await schema_ingestion.search_schema_fields(query, limit)
+            
+            if results:
+                click.echo(f"\n📊 Found {len(results)} matches:")
+                for result in results:
+                    metadata = result.get('metadata', {})
+                    schema_name = metadata.get('schema_name', 'Unknown')
+                    table_name = metadata.get('table_name', 'Unknown')
+                    column_name = metadata.get('column_name', 'Unknown')
+                    column_type = metadata.get('column_type', 'Unknown')
+                    
+                    click.echo(f"  🎯 {schema_name}.{table_name}.{column_name}")
+                    click.echo(f"    Type: {column_type}")
+                    if metadata.get('description'):
+                        click.echo(f"    Description: {metadata['description']}")
+                    click.echo()
+            else:
+                click.echo("  No schema fields found.")
+            
+        except Exception as e:
+            click.echo(f"❌ Search failed: {e}")
+            logger.error(f"Schema search error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_search())
+
+
+@data.command()
+def schema_stats():
+    """Show schema collection statistics."""
+    async def _stats():
+        try:
+            click.echo("📊 Schema Collection Statistics:")
+            
+            stats = await schema_ingestion.get_collection_stats()
+            
+            click.echo(f"  Collection: {stats.get('collection', 'Unknown')}")
+            click.echo(f"  Total Fields in ChromaDB: {stats.get('total_fields', 0)}")
+            click.echo(f"  Schemas Loaded: {stats.get('schemas_loaded', 0)}")
+            
+            if 'error' in stats:
+                click.echo(f"  Error: {stats['error']}")
+            
+        except Exception as e:
+            click.echo(f"❌ Stats failed: {e}")
+            logger.error(f"Schema stats error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_stats())

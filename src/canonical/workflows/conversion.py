@@ -231,10 +231,10 @@ class ConversionWorkflow:
                     field_mappings = {}
                     for field_ref in field_references:
                         try:
-                            mappings = await schema_service.find_field_mappings(
-                                field_query=field_ref,
-                                schema_name=schema_name,
-                                limit=3
+                            mappings = schema_service.find_field_mappings(
+                                field_name=field_ref,
+                                
+                                
                             )
                             if mappings:
                                 field_mappings[field_ref] = mappings
@@ -275,10 +275,20 @@ class ConversionWorkflow:
             request = state["request"]
             
             # Use enhanced LLM service with retry logic
+            # Use enhanced LLM service with retry logic and context
+            context = {
+                "mitre_techniques": state.get("mitre_techniques", []),
+                "similar_rules": state.get("similar_rules", []),
+                "context_data": state.get("context_data", {}),
+                "schema_field_mappings": state.get("context_data", {}).get("schema_field_mappings", {}),
+                "schema_name": state.get("context_data", {}).get("schema_name")
+            }
+            
             conversion_result = await enhanced_llm_service.convert_with_retry(
                 source_rule=request.source_rule,
                 source_format=request.source_format.value,
                 target_format=request.target_format.value,
+                context=context,
                 max_retries=2
             )
             
@@ -360,7 +370,7 @@ class ConversionWorkflow:
                     schema_validation = await validation_service.validate_converted_rule(
                         converted_rule=target_rule,
                         target_format=request.target_format.value,
-                        schema_name=schema_name,
+                        
                         original_field_mappings=original_field_mappings
                     )
                     

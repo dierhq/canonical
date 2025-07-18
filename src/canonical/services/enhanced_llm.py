@@ -28,6 +28,7 @@ class EnhancedLLMService:
         source_rule: str,
         source_format: str,
         target_format: str,
+        context: Optional[Dict[str, Any]] = None,
         max_retries: int = 2
     ) -> Dict[str, Any]:
         """Convert a rule with retry logic."""
