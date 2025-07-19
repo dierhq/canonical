@@ -22,6 +22,12 @@ class EnhancedLLMService:
         if not self._initialized:
             await self.llm_service.initialize()
             self._initialized = True
+            logger.info("Enhanced LLM service initialized with 7B model")
+            
+            # Log model capabilities for 7B upgrade
+            if hasattr(self.llm_service, 'model') and self.llm_service.model:
+                param_count = self.llm_service.model.num_parameters()
+                logger.info(f"Enhanced service ready with {param_count:,} parameter model")
     
     async def convert_with_retry(
         self,

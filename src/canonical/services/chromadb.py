@@ -13,6 +13,7 @@ ChromaDB service for managing vector collections.
 """
 
 import asyncio
+import os
 from typing import List, Dict, Any, Optional, Tuple
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -39,14 +40,28 @@ class ChromaDBService:
         try:
             logger.info("Initializing ChromaDB client")
             
-            # Initialize ChromaDB client
-            self.client = chromadb.PersistentClient(
-                path=settings.chromadb_path,
-                settings=ChromaSettings(
-                    anonymized_telemetry=False,
-                    allow_reset=True
+            # Initialize ChromaDB client with error recovery
+            try:
+                self.client = chromadb.PersistentClient(
+                    path=settings.chromadb_path,
+                    settings=ChromaSettings(
+                        anonymized_telemetry=False,
+                        allow_reset=True,
+                        persist_directory=settings.chromadb_path
+                    )
                 )
-            )
+            except Exception as persist_error:
+                logger.warning(f"Persistent client failed: {persist_error}, trying alternative path")
+                import tempfile
+                alt_path = os.path.join(tempfile.gettempdir(), "chromadb_canonical")
+                os.makedirs(alt_path, exist_ok=True)
+                self.client = chromadb.PersistentClient(
+                    path=alt_path,
+                    settings=ChromaSettings(
+                        anonymized_telemetry=False,
+                        allow_reset=True
+                    )
+                )
             
             # Initialize embedding service
             await embedding_service.initialize()
@@ -98,6 +113,10 @@ class ChromaDBService:
             {
                 "name": settings.ecs_fields_collection,
                 "description": "ECS (Elastic Common Schema) field reference for EQL/KibanaQL"
+            },
+            {
+                "name": "environment_schemas",
+                "description": "Environment schemas for schema-aware rule conversion"
             }
         ]
         
@@ -113,6 +132,28 @@ class ChromaDBService:
                 logger.error(f"Failed to setup collection '{config['name']}': {e}")
                 raise
     
+    async def ensure_collection(self, collection_name: str, description: str = None) -> None:
+        """Ensure a collection exists, creating it if necessary.
+        
+        Args:
+            collection_name: Name of the collection
+            description: Optional description for the collection
+        """
+        if not self._initialized:
+            await self.initialize()
+        
+        if collection_name not in self.collections:
+            try:
+                collection = self.client.get_or_create_collection(
+                    name=collection_name,
+                    metadata={"description": description or f"Dynamic collection: {collection_name}"}
+                )
+                self.collections[collection_name] = collection
+                logger.info(f"Collection '{collection_name}' created/ensured")
+            except Exception as e:
+                logger.error(f"Failed to create collection '{collection_name}': {e}")
+                raise
+
     async def add_documents(
         self,
         collection_name: str,
@@ -131,8 +172,11 @@ class ChromaDBService:
         if not self._initialized:
             await self.initialize()
         
+        # Ensure collection exists
+        await self.ensure_collection(collection_name)
+        
         if collection_name not in self.collections:
-            raise ValueError(f"Collection '{collection_name}' not found")
+            raise ValueError(f"Collection '{collection_name}' could not be created")
         
         try:
             # Generate embeddings

@@ -1,0 +1,7 @@
+title: Simple PowerShell Test
+logsource:
+    product: windows
+detection:
+    sel:
+        ProcessName|endswith: 'powershell.exe'
+    condition: sel

@@ -46,7 +46,8 @@ class QwenLLMService:
             return
             
         try:
-            logger.info(f"Loading Qwen model: {self.model_name}")
+            logger.info(f"Loading Qwen 7B model: {self.model_name}")
+            logger.info(f"Device: {self.device}, Max tokens: {settings.qwen_max_tokens}")
             
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -54,13 +55,21 @@ class QwenLLMService:
                 trust_remote_code=True
             )
             
-            # Load model
+            # Load model with optimized settings for 7B model
+            torch_dtype = getattr(torch, settings.qwen_torch_dtype, torch.float16)
+            
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                torch_dtype=torch_dtype,
                 device_map="auto" if self.device == "cuda" else None,
-                trust_remote_code=True
+                trust_remote_code=True,
+                low_cpu_mem_usage=True if self.device == "cuda" else False
             )
+            
+            logger.info(f"Model loaded with {self.model.num_parameters():,} parameters")
+            if torch.cuda.is_available() and self.device == "cuda":
+                memory_used = torch.cuda.memory_allocated() / (1024**3)
+                logger.info(f"GPU memory usage: {memory_used:.2f} GB")
             
             # Create pipeline
             self.pipeline = pipeline(
@@ -93,24 +102,39 @@ class QwenLLMService:
         try:
             max_tokens = max_tokens or settings.qwen_max_tokens
             
-            # Run generation in thread pool to avoid blocking
+            # Use direct model generation for better control
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: self.pipeline(
-                    prompt,
-                    max_new_tokens=max_tokens,
-                    temperature=settings.qwen_temperature,
-                    do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id,
-                    return_full_text=False
-                )
-            )
+            result = await loop.run_in_executor(None, self._generate_direct, prompt, max_tokens)
             
-            return result[0]["generated_text"].strip()
+            return result
         except Exception as e:
             logger.error(f"Failed to generate response: {e}")
             raise
+    
+    def _generate_direct(self, prompt: str, max_tokens: int) -> str:
+        """Direct generation using model and tokenizer."""
+        # Tokenize input
+        inputs = self.tokenizer(prompt, return_tensors="pt")
+        if self.device == "cuda":
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        
+        # Generate with conservative parameters
+        with torch.no_grad():
+            outputs = self.model.generate(
+                inputs["input_ids"],
+                attention_mask=inputs.get("attention_mask"),
+                max_new_tokens=max_tokens,
+                do_sample=False,  # Use greedy decoding for stability
+                pad_token_id=self.tokenizer.eos_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+        
+        # Decode response
+        response = self.tokenizer.decode(
+            outputs[0][inputs["input_ids"].shape[1]:], 
+            skip_special_tokens=True
+        )
+        return response.strip()
     
     async def convert_sigma_rule(
         self, 

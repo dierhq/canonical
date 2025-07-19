@@ -15,6 +15,7 @@ Command-line interface for the Canonical SIEM rule converter.
 import asyncio
 import json
 import sys
+import re
 from pathlib import Path
 from typing import Optional
 import click
@@ -29,11 +30,85 @@ from .data_ingestion.car_ingestion import car_ingestion
 from .data_ingestion.atomic_ingestion import atomic_ingestion
 from .data_ingestion.azure_sentinel_ingestion import AzureSentinelIngestion
 from .data_ingestion.qradar_docs_ingestion import qradar_docs_ingestion
-from .data_ingestion.ecs_ingestion import ecs_ingestion
+# from .data_ingestion.ecs_ingestion import ecs_ingestion  # Module doesn't exist
 from .data_ingestion.all_ingestion import ingest_all_data
-from .data_ingestion.schema_ingestion import schema_ingestion
-from .services.schema_service import SchemaService
+# from .data_ingestion.schema_ingestion import schema_ingestion  # Module doesn't exist
+# from .services.schema_service import SchemaService  # Module doesn't exist
 from .core.models import SchemaIngestionRequest
+
+
+def clean_llm_output(raw_output: str) -> str:
+    """Clean and extract the actual KustoQL from LLM output."""
+    try:
+        # Remove special characters and markers
+        cleaned = raw_output.replace('!', '').replace('json', '').replace('```', '')
+        
+        # Try to extract JSON and get the target_rule
+        if '{' in cleaned and '}' in cleaned:
+            # Find JSON content
+            start = cleaned.find('{')
+            end = cleaned.rfind('}') + 1
+            json_str = cleaned[start:end]
+            
+            try:
+                parsed = json.loads(json_str)
+                target_rule = None
+                if 'target_rule' in parsed:
+                    target_rule = parsed['target_rule']
+                elif 'target rule' in parsed:
+                    target_rule = parsed['target rule']
+                elif 'targetrule' in parsed:
+                    target_rule = parsed['targetrule']
+                
+                if target_rule:
+                    # Format the KustoQL properly
+                    return format_kustoql(target_rule)
+            except json.JSONDecodeError:
+                pass
+        
+        # Look for KustoQL patterns in the text
+        kql_pattern = r'(SecurityEvent|Security Event)[^"]*'
+        match = re.search(kql_pattern, cleaned, re.IGNORECASE)
+        if match:
+            return format_kustoql(match.group())
+        
+        # Fallback: look for KustoQL keywords
+        lines = cleaned.split('\n')
+        kql_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if any(keyword in line.lower() for keyword in [
+                'securityevent', 'security event', 'where', 'project', 
+                'summarize', 'extend', 'top', 'order by', 'join'
+            ]):
+                kql_lines.append(line)
+        
+        if kql_lines:
+            return format_kustoql(' '.join(kql_lines))
+        
+        # If all else fails, return cleaned text
+        return cleaned.strip()
+        
+    except Exception:
+        return raw_output
+
+
+def format_kustoql(kql: str) -> str:
+    """Format KustoQL for better readability."""
+    try:
+        # Clean quotes and backslashes
+        formatted = kql.replace('\\"', '"').replace('\\\\', '\\')
+        
+        # Add proper line breaks for KQL operators
+        formatted = re.sub(r'\|', '\n|', formatted)
+        
+        # Clean up spacing
+        lines = [line.strip() for line in formatted.split('\n') if line.strip()]
+        
+        return '\n'.join(lines)
+    except Exception:
+        return kql
 
 
 @click.group()
@@ -82,15 +157,24 @@ def convert(source_file: Path, target_format: str, source_format: str, output: O
                     if response.mitre_techniques:
                         click.echo(f"MITRE Techniques: {', '.join(response.mitre_techniques)}")
                 
+                # Clean the output for better readability
+                clean_rule = clean_llm_output(response.target_rule)
+                
                 # Output converted rule
                 if output:
                     with open(output, 'w', encoding='utf-8') as f:
-                        f.write(response.target_rule)
+                        f.write(clean_rule)
                     click.echo(f"Converted rule saved to: {output}")
                 else:
-                    click.echo("\nConverted Rule:")
-                    click.echo("-" * 40)
-                    click.echo(response.target_rule)
+                    click.echo("\n🎯 Clean KustoQL Output:")
+                    click.echo("=" * 60)
+                    click.echo(clean_rule)
+                    click.echo("=" * 60)
+                    
+                    if verbose:
+                        click.echo(f"\n📋 Raw Output (for debugging):")
+                        click.echo("-" * 40)
+                        click.echo(response.target_rule[:200] + "..." if len(response.target_rule) > 200 else response.target_rule)
             else:
                 click.echo(f"❌ Conversion failed: {response.error_message}")
                 sys.exit(1)
@@ -826,9 +910,12 @@ def ingest_ecs(force_refresh: bool):
             click.echo("📖 This will scrape Elastic Common Schema documentation")
             click.echo("   to improve EQL/KibanaQL field knowledge for rule conversion")
             
-            stats = await ecs_ingestion.ingest_ecs_fields(force_refresh=force_refresh)
+            # stats = await ecs_ingestion.ingest_ecs_fields(force_refresh=force_refresh)
+            # ECS ingestion temporarily disabled - module doesn't exist
+            click.echo("⚠️  ECS field reference ingestion is temporarily disabled")
+            stats = {"success": False, "error": "ECS ingestion module not available"}
             
-            if stats.get("success", False):
+            if False:  # stats.get("success", False):
                 click.echo(f"\n✅ ECS field reference ingestion completed:")
                 click.echo(f"   Field Sets: {stats.get('field_sets', 0)}")
                 click.echo(f"   Total Fields: {stats.get('total_fields', 0)}")
@@ -860,9 +947,12 @@ def ingest_schemas(force_refresh: bool):
         try:
             click.echo("📋 Starting schema ingestion from schemas directory...")
             
-            stats = await schema_ingestion.ingest_all_schemas(force_refresh=force_refresh)
+            # stats = await schema_ingestion.ingest_all_schemas(force_refresh=force_refresh)
+            # Schema ingestion temporarily disabled - module doesn't exist
+            click.echo("⚠️  Schema ingestion is temporarily disabled")
+            stats = {"success": False, "error": "Schema ingestion module not available"}
             
-            if stats.get("success", False):
+            if False:  # stats.get("success", False):
                 click.echo(f"✅ Schema ingestion completed:")
                 click.echo(f"  Total files: {stats['total_files']}")
                 click.echo(f"  Successful: {stats['successful']}")
@@ -903,9 +993,12 @@ def search_schema_fields(query: str, limit: int):
         try:
             click.echo(f"🔍 Searching schema fields for: '{query}'")
             
-            results = await schema_ingestion.search_schema_fields(query, limit)
+            # results = await schema_ingestion.search_schema_fields(query, limit)
+            # Schema search temporarily disabled - module doesn't exist
+            click.echo("⚠️  Schema field search is temporarily disabled")
+            results = []
             
-            if results:
+            if False:  # results:
                 click.echo(f"\n📊 Found {len(results)} matches:")
                 for result in results:
                     metadata = result.get('metadata', {})
@@ -937,7 +1030,10 @@ def schema_stats():
         try:
             click.echo("📊 Schema Collection Statistics:")
             
-            stats = await schema_ingestion.get_collection_stats()
+            # stats = await schema_ingestion.get_collection_stats()
+            # Schema stats temporarily disabled - module doesn't exist
+            click.echo("⚠️  Schema statistics are temporarily disabled")
+            stats = {"collection": "N/A", "total_fields": 0, "schemas_loaded": 0, "error": "Schema ingestion module not available"}
             
             click.echo(f"  Collection: {stats.get('collection', 'Unknown')}")
             click.echo(f"  Total Fields in ChromaDB: {stats.get('total_fields', 0)}")

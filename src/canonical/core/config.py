@@ -54,11 +54,12 @@ class Settings(BaseSettings):
     embedding_device: str = Field(default="cpu", env="EMBEDDING_DEVICE")
     embedding_batch_size: int = Field(default=32, env="EMBEDDING_BATCH_SIZE")
     
-    # Qwen LLM settings
-    qwen_model: str = Field(default="Qwen/Qwen2.5-3B-Instruct", env="QWEN_MODEL")
-    qwen_device: str = Field(default="cpu", env="QWEN_DEVICE")
-    qwen_max_tokens: int = Field(default=4096, env="QWEN_MAX_TOKENS")
+    # Qwen LLM settings - Updated to 7B model
+    qwen_model: str = Field(default="Qwen/Qwen2.5-7B-Instruct", env="QWEN_MODEL")
+    qwen_device: str = Field(default="cuda", env="QWEN_DEVICE")  # Use CUDA by default for 7B model
+    qwen_max_tokens: int = Field(default=8192, env="QWEN_MAX_TOKENS")  # Increased context window
     qwen_temperature: float = Field(default=0.1, env="QWEN_TEMPERATURE")
+    qwen_torch_dtype: str = Field(default="float16", env="QWEN_TORCH_DTYPE")  # Use FP16 for efficiency
     
     # Data sources
     sigma_repo_url: str = Field(
