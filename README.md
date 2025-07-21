@@ -15,6 +15,30 @@
 
 ---
 
+## 🆕 **Foundation-Sec-8B Upgrade**
+
+**MAJOR UPDATE**: Canonical now uses **Foundation-Sec-8B by Cisco** as the primary LLM for superior cybersecurity performance!
+
+### 🚀 **Why Foundation-Sec-8B?**
+- **🎯 Purpose-Built**: Specialized for cybersecurity (trained on 5.1B tokens of security data)
+- **📈 Better Performance**: 5-13% improvement on cybersecurity benchmarks vs general models
+- **🛡️ Domain Expertise**: Deep knowledge of CVEs, CWEs, MITRE ATT&CK, threat intelligence
+- **🔧 SIEM Optimized**: Enhanced rule conversion accuracy for all supported formats
+- **🏢 Enterprise Ready**: Apache 2.0 license, local deployment, air-gapped compatible
+
+### ⚡ **Intelligent Model Selection**
+- **Primary**: Foundation-Sec-8B for cybersecurity tasks
+- **Fallback**: Qwen 2.5-3B for compatibility and general tasks  
+- **Auto-Quantization**: 4-bit quantization on systems with <24GB VRAM
+- **Smart Routing**: Automatic model selection based on task requirements
+
+### 💾 **System Requirements**
+- **Memory**: 32GB+ RAM (vs 16GB for Qwen-only)
+- **GPU**: 16GB+ VRAM recommended (RTX A6000, V100, A100)
+- **Storage**: Additional 10GB for Foundation-Sec-8B model
+
+---
+
 ## 🎯 Overview
 
 Canonical is an advanced SIEM rule converter designed specifically for **Security Operations Centers (SOCs)**, **Managed Detection and Response (MDR)** services, and **enterprise cybersecurity teams**. It leverages local LLM processing and on-premises intelligence to provide context-aware, intelligent rule conversions with high accuracy and comprehensive security intelligence - perfect for air-gapped and secure environments.

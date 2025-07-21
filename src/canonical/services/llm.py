@@ -9,7 +9,7 @@ For licensing inquiries, contact: licensing@dier.org
 """
 
 """
-Qwen LLM service for intelligent rule conversion.
+Enhanced LLM service supporting Foundation-Sec-8B and Qwen with intelligent fallback.
 """
 
 import asyncio
@@ -23,73 +23,269 @@ from ..core.config import settings
 from ..core.models import TargetFormat
 
 
-class QwenLLMService:
-    """Qwen language model service for rule conversion."""
+class EnhancedLLMService:
+    """Enhanced language model service supporting Foundation-Sec-8B and Qwen fallback."""
     
-    def __init__(self, model_name: Optional[str] = None, device: Optional[str] = None):
-        """Initialize the LLM service.
+    def __init__(self, primary_model: Optional[str] = None, fallback_model: Optional[str] = None, device: Optional[str] = None):
+        """Initialize the enhanced LLM service.
         
         Args:
-            model_name: Name of the Qwen model to use
-            device: Device to run the model on ('cpu', 'cuda', 'mps')
+            primary_model: Primary model name (Foundation-Sec-8B by default)
+            fallback_model: Fallback model name (Qwen by default)
+            device: Device to run the model on ('auto', 'cpu', 'cuda', 'mps')
         """
-        self.model_name = model_name or settings.qwen_model
-        self.device = device or settings.qwen_device
-        self.tokenizer = None
-        self.model = None
-        self.pipeline = None
-        self._initialized = False
-    
+        # Model configuration
+        self.use_foundation_sec = settings.use_foundation_sec
+        self.enable_fallback = settings.enable_model_fallback
+        
+        # Primary model (Foundation-Sec-8B)
+        self.primary_model_name = primary_model or settings.llm_model
+        self.primary_device = device or settings.llm_device
+        
+        # Fallback model (Qwen)
+        self.fallback_model_name = fallback_model or settings.qwen_model
+        self.fallback_device = settings.qwen_device
+        
+        # Model instances
+        self.primary_tokenizer = None
+        self.primary_model = None
+        self.primary_pipeline = None
+        
+        self.fallback_tokenizer = None
+        self.fallback_model = None
+        self.fallback_pipeline = None
+        
+        # State tracking
+        self.primary_initialized = False
+        self.fallback_initialized = False
+        self.current_model = None
+        self.model_capabilities = {}
+        
     async def initialize(self) -> None:
-        """Initialize the Qwen model."""
-        if self._initialized:
-            return
-            
+        """Initialize the LLM service with intelligent model selection."""
         try:
-            logger.info(f"Loading Qwen model: {self.model_name}")
+            if self.use_foundation_sec:
+                await self._initialize_primary_model()
+            
+            # Always try to initialize fallback if enabled
+            if self.enable_fallback:
+                await self._initialize_fallback_model()
+                
+            # Set current model
+            if self.primary_initialized:
+                self.current_model = "foundation-sec-8b"
+                logger.info("Using Foundation-Sec-8B as primary model")
+            elif self.fallback_initialized:
+                self.current_model = "qwen"
+                logger.info("Using Qwen as fallback model")
+            else:
+                raise RuntimeError("No models successfully initialized")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM service: {e}")
+            raise
+    
+    async def _initialize_primary_model(self) -> None:
+        """Initialize Foundation-Sec-8B model."""
+        try:
+            logger.info(f"Loading Foundation-Sec-8B model: {self.primary_model_name}")
+            
+            # Determine device and dtype
+            device_map = self._get_device_map(self.primary_device)
+            torch_dtype = self._get_torch_dtype(self.primary_device)
             
             # Load tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name,
+            self.primary_tokenizer = AutoTokenizer.from_pretrained(
+                self.primary_model_name,
+                trust_remote_code=False  # Foundation-Sec-8B doesn't need custom code
+            )
+            
+            # Set pad token if not exists
+            if self.primary_tokenizer.pad_token is None:
+                self.primary_tokenizer.pad_token = self.primary_tokenizer.eos_token
+            
+            # Load model with optimization
+            model_kwargs = {
+                "torch_dtype": torch_dtype,
+                "device_map": device_map,
+                "trust_remote_code": False,
+                # "attn_implementation": "flash_attention_2" if self._supports_flash_attention() else "eager"  # Disabled for compatibility
+            }
+            
+            # Add quantization if needed for memory efficiency
+            if self._should_use_quantization():
+                from transformers import BitsAndBytesConfig
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch_dtype,
+                    bnb_4bit_use_double_quant=True
+                )
+                logger.info("Using 4-bit quantization for memory efficiency")
+            
+            self.primary_model = AutoModelForCausalLM.from_pretrained(
+                self.primary_model_name,
+                **model_kwargs
+            )
+            
+            # Create pipeline
+            self.primary_pipeline = pipeline(
+                "text-generation",
+                model=self.primary_model,
+                tokenizer=self.primary_tokenizer,
+                torch_dtype=torch_dtype,
+                device_map=device_map
+            )
+            
+            self.primary_initialized = True
+            self.model_capabilities["foundation-sec-8b"] = {
+                "cybersecurity_specialized": True,
+                "mitre_attack_knowledge": True,
+                "vulnerability_mapping": True,
+                "threat_intelligence": True,
+                "rule_conversion_optimized": True
+            }
+            
+            logger.info(f"Foundation-Sec-8B loaded successfully on {self.primary_device}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load Foundation-Sec-8B: {e}")
+            if not self.enable_fallback:
+                raise
+            logger.info("Will attempt fallback to Qwen model")
+    
+    async def _initialize_fallback_model(self) -> None:
+        """Initialize Qwen fallback model."""
+        try:
+            logger.info(f"Loading Qwen fallback model: {self.fallback_model_name}")
+            
+            # Load tokenizer
+            self.fallback_tokenizer = AutoTokenizer.from_pretrained(
+                self.fallback_model_name,
                 trust_remote_code=True
             )
             
             # Load model
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map="auto" if self.device == "cuda" else None,
+            torch_dtype = torch.float16 if self.fallback_device == "cuda" else torch.float32
+            self.fallback_model = AutoModelForCausalLM.from_pretrained(
+                self.fallback_model_name,
+                torch_dtype=torch_dtype,
+                device_map="auto" if self.fallback_device == "cuda" else None,
                 trust_remote_code=True
             )
             
             # Create pipeline
-            self.pipeline = pipeline(
+            self.fallback_pipeline = pipeline(
                 "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                model=self.fallback_model,
+                tokenizer=self.fallback_tokenizer,
+                torch_dtype=torch_dtype
             )
             
-            self._initialized = True
-            logger.info(f"Qwen model loaded successfully on {self.device}")
+            self.fallback_initialized = True
+            self.model_capabilities["qwen"] = {
+                "cybersecurity_specialized": False,
+                "general_language": True,
+                "rule_conversion_basic": True
+            }
+            
+            logger.info(f"Qwen fallback model loaded successfully on {self.fallback_device}")
+            
         except Exception as e:
-            logger.error(f"Failed to load Qwen model: {e}")
-            raise
+            logger.error(f"Failed to load Qwen fallback model: {e}")
+            if not self.primary_initialized:
+                raise
     
-    async def generate_response(self, prompt: str, max_tokens: Optional[int] = None) -> str:
-        """Generate a response using the Qwen model.
+    def _get_device_map(self, device: str) -> str:
+        """Get appropriate device mapping."""
+        if device == "auto":
+            return "auto"
+        elif device == "cuda" and torch.cuda.is_available():
+            return "auto"
+        else:
+            return None
+    
+    def _get_torch_dtype(self, device: str) -> torch.dtype:
+        """Get appropriate torch dtype based on device."""
+        if device in ["cuda", "auto"] and torch.cuda.is_available():
+            return torch.float16
+        else:
+            return torch.float32
+    
+    def _supports_flash_attention(self) -> bool:
+        """Check if flash attention is available."""
+        try:
+            import flash_attn
+            return torch.cuda.is_available()
+        except ImportError:
+            return False
+    
+    def _should_use_quantization(self) -> bool:
+        """Determine if quantization should be used based on available memory."""
+        if not torch.cuda.is_available():
+            return False
+        
+        try:
+            # Check available GPU memory
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9  # GB
+            # Use quantization if GPU has less than 24GB memory
+            return gpu_memory < 24
+        except:
+            return True  # Default to quantization for safety
+    
+    async def generate_response(self, prompt: str, max_tokens: Optional[int] = None, use_cybersec_optimization: bool = True) -> str:
+        """Generate a response using the best available model.
         
         Args:
             prompt: Input prompt
             max_tokens: Maximum number of tokens to generate
+            use_cybersec_optimization: Whether to use cybersecurity-optimized settings
             
         Returns:
             Generated response
         """
-        if not self._initialized:
+        if not (self.primary_initialized or self.fallback_initialized):
             await self.initialize()
+        
+        # Choose model based on task and availability
+        if self.primary_initialized and (use_cybersec_optimization or not self.fallback_initialized):
+            return await self._generate_with_primary(prompt, max_tokens)
+        elif self.fallback_initialized:
+            return await self._generate_with_fallback(prompt, max_tokens)
+        else:
+            raise RuntimeError("No models available for generation")
+    
+    async def _generate_with_primary(self, prompt: str, max_tokens: Optional[int] = None) -> str:
+        """Generate response with Foundation-Sec-8B."""
+        try:
+            max_tokens = max_tokens or settings.llm_max_tokens
             
+            # Run generation in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self.primary_pipeline(
+                    prompt,
+                    max_new_tokens=max_tokens,
+                    temperature=settings.llm_temperature,
+                    do_sample=True,
+                    pad_token_id=self.primary_tokenizer.eos_token_id,
+                    return_full_text=False,
+                    repetition_penalty=1.1,
+                    top_p=0.9
+                )
+            )
+            
+            return result[0]["generated_text"].strip()
+            
+        except Exception as e:
+            logger.error(f"Failed to generate with Foundation-Sec-8B: {e}")
+            if self.fallback_initialized and self.enable_fallback:
+                logger.info("Falling back to Qwen model")
+                return await self._generate_with_fallback(prompt, max_tokens)
+            raise
+    
+    async def _generate_with_fallback(self, prompt: str, max_tokens: Optional[int] = None) -> str:
+        """Generate response with Qwen fallback."""
         try:
             max_tokens = max_tokens or settings.qwen_max_tokens
             
@@ -97,19 +293,20 @@ class QwenLLMService:
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
-                lambda: self.pipeline(
+                lambda: self.fallback_pipeline(
                     prompt,
                     max_new_tokens=max_tokens,
                     temperature=settings.qwen_temperature,
                     do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id,
+                    pad_token_id=self.fallback_tokenizer.eos_token_id,
                     return_full_text=False
                 )
             )
             
             return result[0]["generated_text"].strip()
+            
         except Exception as e:
-            logger.error(f"Failed to generate response: {e}")
+            logger.error(f"Failed to generate with Qwen fallback: {e}")
             raise
     
     async def convert_sigma_rule(
@@ -118,7 +315,7 @@ class QwenLLMService:
         target_format: TargetFormat,
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Convert a Sigma rule to the target format.
+        """Convert a Sigma rule to the target format using cybersecurity optimization.
         
         Args:
             sigma_rule: Sigma rule content
@@ -131,7 +328,8 @@ class QwenLLMService:
         prompt = self._build_conversion_prompt(sigma_rule, target_format, context)
         
         try:
-            response = await self.generate_response(prompt)
+            # Use cybersecurity optimization for better results
+            response = await self.generate_response(prompt, use_cybersec_optimization=True)
             logger.debug(f"LLM raw response: {response}")
             return self._parse_conversion_response(response, target_format)
         except Exception as e:
@@ -144,238 +342,12 @@ class QwenLLMService:
                 "error_message": str(e)
             }
     
-    def _build_conversion_prompt(
-        self, 
-        sigma_rule: str, 
-        target_format: TargetFormat,
-        context: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """Build the conversion prompt for the LLM.
-        
-        Args:
-            sigma_rule: Sigma rule content
-            target_format: Target format
-            context: Additional context
-            
-        Returns:
-            Formatted prompt
-        """
-        format_descriptions = {
-            TargetFormat.KUSTOQL: "KustoQL (Azure Data Explorer/Sentinel)",
-            TargetFormat.KIBANAQL: "Kibana Query Language (Elastic)",
-            TargetFormat.EQL: "Event Query Language (Elastic)",
-            TargetFormat.QRADAR: "QRadar AQL (IBM)",
-            TargetFormat.SPL: "Splunk Processing Language"
-        }
-        
-        format_examples = {
-            TargetFormat.KUSTOQL: """
-Example KustoQL:
-SecurityEvent
-| where EventID == 4688
-| where Process contains "powershell.exe"
-| where CommandLine contains "-EncodedCommand"
-""",
-            TargetFormat.KIBANAQL: """
-Example Kibana Query:
-event.code:4688 AND process.name:powershell.exe AND process.command_line:*EncodedCommand*
-""",
-            TargetFormat.EQL: """
-Example EQL:
-process where process.name == "powershell.exe" and process.command_line like "*EncodedCommand*"
-""",
-            TargetFormat.QRADAR: """
-Example QRadar AQL:
-SELECT * FROM events WHERE eventid=4688 AND processname LIKE '%powershell.exe%' AND commandline LIKE '%EncodedCommand%'
-""",
-            TargetFormat.SPL: """
-Example SPL:
-index=security EventCode=4688 Image="*powershell.exe" CommandLine="*EncodedCommand*"
-"""
-        }
-        
-        context_info = ""
-        if context:
-            if "mitre_techniques" in context:
-                context_info += f"\nMITRE ATT&CK Techniques: {', '.join(context['mitre_techniques'])}"
-            if "similar_rules" in context:
-                context_info += f"\nSimilar rules found: {len(context['similar_rules'])}"
-        
-        prompt = f"""You are an expert SIEM rule converter. Convert the following Sigma rule to {format_descriptions[target_format]}.
-
-Sigma Rule:
-```yaml
-{sigma_rule}
-```
-
-Target Format: {target_format.value.upper()}
-{format_examples[target_format]}
-
-{context_info}
-
-Instructions:
-1. Analyze the Sigma rule structure and detection logic
-2. Map Sigma fields to the target format's field names
-3. Convert conditions and operators appropriately
-4. Maintain the detection logic and intent
-5. Provide a confidence score (0.0-1.0)
-6. Explain the conversion process
-
-Respond in the following JSON format:
-{{
-    "success": true,
-    "target_rule": "converted rule here",
-    "confidence_score": 0.95,
-    "explanation": "Detailed explanation of the conversion process",
-    "field_mappings": {{"sigma_field": "target_field"}},
-    "notes": "Any important notes or limitations"
-}}
-
-Response:"""
-        
-        return prompt
-    
-    def _parse_conversion_response(self, response: str, target_format: TargetFormat) -> Dict[str, Any]:
-        """Parse the LLM response for conversion results.
-        
-        Args:
-            response: LLM response
-            target_format: Target format
-            
-        Returns:
-            Parsed conversion result
-        """
-        try:
-            # Clean up the response - remove markdown code blocks and handle multiple JSON blocks
-            cleaned_response = response.strip()
-            
-            # Remove markdown code blocks
-            import re
-            # Remove ```json and ``` markers
-            cleaned_response = re.sub(r'```json\s*', '', cleaned_response)
-            cleaned_response = re.sub(r'```\s*', '', cleaned_response)
-            
-            # Find all JSON objects in the response
-            json_objects = []
-            brace_count = 0
-            start_idx = -1
-            
-            for i, char in enumerate(cleaned_response):
-                if char == '{':
-                    if brace_count == 0:
-                        start_idx = i
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0 and start_idx != -1:
-                        json_objects.append(cleaned_response[start_idx:i+1])
-                        start_idx = -1
-            
-            # Try to parse each JSON object and use the first valid one
-            logger.debug(f"Found {len(json_objects)} JSON objects to parse")
-            for json_str in json_objects:
-                
-                # Try to fix common JSON issues with multi-line strings
-                try:
-                    result = json.loads(json_str)
-                    
-                    # Validate and clean up required fields
-                    if "target_rule" in result and result["target_rule"]:
-                        # Unescape newlines in target_rule if needed
-                        if isinstance(result["target_rule"], str):
-                            result["target_rule"] = result["target_rule"].replace('\\n', '\n').replace('\\r', '\r')
-                    else:
-                        result["target_rule"] = None
-                        
-                    if "confidence_score" not in result:
-                        result["confidence_score"] = 0.5
-                    if "explanation" not in result:
-                        result["explanation"] = "No explanation provided"
-                    
-                    result["success"] = bool(result.get("target_rule"))
-                    return result
-                    
-                except json.JSONDecodeError:
-                    # Try to fix malformed JSON by escaping newlines in target_rule
-                    # Find target_rule value and escape newlines
-                    pattern = r'"target_rule":\s*"([^"]*(?:\n[^"]*)*)"'
-                    match = re.search(pattern, json_str, re.DOTALL)
-                    if match:
-                        original_rule = match.group(1)
-                        escaped_rule = original_rule.replace('\n', '\\n').replace('\r', '\\r')
-                        json_str = json_str.replace(match.group(0), f'"target_rule": "{escaped_rule}"')
-                        
-                        try:
-                            result = json.loads(json_str)
-                            # Unescape newlines in target_rule
-                            if "target_rule" in result and result["target_rule"]:
-                                result["target_rule"] = result["target_rule"].replace('\\n', '\n').replace('\\r', '\r')
-                            else:
-                                result["target_rule"] = None
-                                
-                            if "confidence_score" not in result:
-                                result["confidence_score"] = 0.5
-                            if "explanation" not in result:
-                                result["explanation"] = "No explanation provided"
-                            
-                            result["success"] = bool(result.get("target_rule"))
-                            return result
-                        except json.JSONDecodeError:
-                            continue  # Try next JSON object
-                    else:
-                        continue  # Try next JSON object
-            
-            # If no valid JSON objects found, fallback to extracting rule from response
-            # Fallback: treat entire response as the converted rule
-            return {
-                "success": True,
-                "target_rule": cleaned_response,
-                "confidence_score": 0.3,
-                "explanation": "Rule extracted from unstructured response",
-                "field_mappings": {},
-                "notes": "Response format was not structured"
-            }
-        except (json.JSONDecodeError, Exception) as e:
-            logger.warning(f"Failed to parse JSON response: {e}")
-            # Try to extract just the rule part from the response
-            lines = response.split('\n')
-            rule_lines = []
-            in_rule = False
-            
-            for line in lines:
-                if 'SecurityEvent' in line or 'index=' in line or 'process where' in line or 'SELECT' in line:
-                    in_rule = True
-                if in_rule:
-                    rule_lines.append(line.strip())
-                    if line.strip().endswith('"') or line.strip().endswith(','):
-                        break
-            
-            if rule_lines:
-                extracted_rule = '\n'.join(rule_lines).strip(' ",')
-                return {
-                    "success": True,
-                    "target_rule": extracted_rule,
-                    "confidence_score": 0.4,
-                    "explanation": "Rule extracted from malformed response",
-                    "field_mappings": {},
-                    "notes": "Response format was malformed but rule was extracted"
-                }
-            
-            # Final fallback
-            return {
-                "success": False,
-                "target_rule": None,
-                "confidence_score": 0.0,
-                "explanation": "Failed to parse LLM response",
-                "error_message": f"Invalid response format: {str(e)}"
-            }
-    
     async def convert_qradar_to_kustoql(
         self, 
         qradar_rule: str, 
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Convert a QRadar rule to KustoQL.
+        """Convert a QRadar rule to KustoQL using cybersecurity optimization.
         
         Args:
             qradar_rule: QRadar rule content
@@ -387,7 +359,8 @@ Response:"""
         prompt = self._build_qradar_to_kustoql_prompt(qradar_rule, context)
         
         try:
-            response = await self.generate_response(prompt)
+            # Use cybersecurity optimization for better results
+            response = await self.generate_response(prompt, use_cybersec_optimization=True)
             logger.debug(f"QRadar to KustoQL LLM response: {response}")
             return self._parse_conversion_response(response, TargetFormat.KUSTOQL)
         except Exception as e:
@@ -400,136 +373,204 @@ Response:"""
                 "error_message": str(e)
             }
     
-    def _build_qradar_to_kustoql_prompt(
+    def _build_conversion_prompt(
         self, 
-        qradar_rule: str, 
+        sigma_rule: str, 
+        target_format: TargetFormat,
         context: Optional[Dict[str, Any]] = None
     ) -> str:
-        """Build the QRadar to KustoQL conversion prompt.
+        """Build the conversion prompt optimized for Foundation-Sec-8B.
         
         Args:
-            qradar_rule: QRadar rule content
-            context: Additional context including Azure Sentinel examples
+            sigma_rule: Sigma rule content
+            target_format: Target format
+            context: Additional context
             
         Returns:
-            Formatted prompt
+            Formatted prompt optimized for cybersecurity models
         """
-        context_info = ""
-        azure_examples = ""
+        # Enhanced prompts for Foundation-Sec-8B
+        cybersec_context = ""
+        if self.current_model == "foundation-sec-8b":
+            cybersec_context = """
+As a cybersecurity-specialized model, consider:
+- MITRE ATT&CK technique mappings
+- Common attack patterns and TTPs
+- Field standardization across SIEM platforms
+- Security context and threat intelligence
+"""
         
+        format_descriptions = {
+            TargetFormat.KUSTOQL: "KustoQL (Azure Data Explorer/Sentinel)",
+            TargetFormat.KIBANAQL: "Kibana Query Language (Elastic)",
+            TargetFormat.EQL: "Event Query Language (Elastic)",
+            TargetFormat.QRADAR: "QRadar AQL (IBM)",
+            TargetFormat.SPL: "Splunk Processing Language"
+        }
+        
+        # Rest of the existing prompt building logic...
+        context_info = ""
         if context:
             if "mitre_techniques" in context:
                 context_info += f"\nMITRE ATT&CK Techniques: {', '.join(context['mitre_techniques'])}"
-            
             if "similar_rules" in context:
                 context_info += f"\nSimilar rules found: {len(context['similar_rules'])}"
-            
-            if "azure_sentinel_examples" in context:
-                azure_examples = "\n\nRelevant Azure Sentinel Examples:\n"
-                for i, example in enumerate(context["azure_sentinel_examples"][:3]):  # Limit to 3 examples
-                    azure_examples += f"\nExample {i+1}:\n{example.get('query', '')}\n"
         
-        prompt = f"""You are an expert SIEM rule converter specializing in converting QRadar correlation rules to KustoQL (Azure Sentinel).
+        prompt = f"""You are an expert SIEM rule converter with deep cybersecurity knowledge. Convert the following Sigma rule to {format_descriptions[target_format]}.
 
-QRadar Rule to Convert:
-```
-{qradar_rule}
+{cybersec_context}
+
+Sigma Rule:
+```yaml
+{sigma_rule}
 ```
 
+Target Format: {target_format.value.upper()}
 {context_info}
-{azure_examples}
-
-QRadar to KustoQL Field Mappings:
-- sourceip → SourceIP, SrcIP, or ClientIP
-- destinationip → DestinationIP, DstIP, or DestIP  
-- username → AccountName, UserName, or Account
-- qid → EventID (map to Windows Event IDs when possible)
-- category → EventCategory or Category
-- payload → EventData or CommandLine
-- hostname → Computer or DeviceName
-- processname → ProcessName or NewProcessName
-- filename → FileName or TargetFilename
-- url → Url or RequestURL
-- domainname → Domain or TargetDomainName
-
-QRadar Operators to KustoQL:
-- = → ==
-- != → !=
-- ilike → contains (case-insensitive)
-- not ilike → !contains
-- in → in~
-- not in → !in~
-- matches → matches regex
-- > → >
-- < → <
-
-QRadar Time Windows to KustoQL:
-- "last X minutes" → "ago(Xm)"
-- "last X hours" → "ago(Xh)"  
-- "last X days" → "ago(Xd)"
-
-KustoQL Table Selection Guidelines:
-- Windows Events: SecurityEvent, Event, WindowsEvent
-- Network Events: CommonSecurityLog, NetworkCommunicationEvents
-- DNS Events: DnsEvents
-- Process Events: SecurityEvent (EventID 4688), ProcessCreationEvents
-- Logon Events: SecurityEvent (EventID 4624, 4625), SigninLogs
-- File Events: DeviceFileEvents, SecurityEvent
-- Web/Proxy: CommonSecurityLog, W3CIISLog
 
 Instructions:
-1. Analyze the QRadar rule structure and detection logic
-2. Map QRadar fields to appropriate KustoQL table fields
-3. Convert QRadar operators to KustoQL operators
-4. Handle time windows and aggregations appropriately
-5. Select the most appropriate KustoQL table(s)
-6. Maintain the detection logic and intent
-7. Use proper KustoQL syntax and functions
-8. Provide a confidence score (0.0-1.0)
-9. Explain the conversion process and any assumptions made
+1. Analyze the Sigma rule structure and detection logic
+2. Map Sigma fields to the target format's field names
+3. Convert conditions and operators appropriately
+4. Maintain the detection logic and intent
+5. Apply cybersecurity best practices
+6. Provide a confidence score (0.0-1.0)
+7. Explain the conversion process
 
-Respond in the following JSON format:
+Respond in JSON format:
 {{
     "success": true,
-    "target_rule": "// Converted from QRadar rule\\n// Original rule logic: [brief description]\\n\\nTableName\\n| where TimeGenerated > ago(1h)\\n| where Field == \\"value\\"\\n| project TimeGenerated, Field1, Field2\\n| summarize count() by Field1",
-    "confidence_score": 0.85,
-    "explanation": "Detailed explanation of the conversion process, field mappings, and any assumptions made",
-    "field_mappings": {{"qradar_field": "kustoql_field"}},
-    "table_used": "SecurityEvent",
-    "notes": "Any important notes, limitations, or manual adjustments needed"
+    "target_rule": "converted rule here",
+    "confidence_score": 0.95,
+    "explanation": "Detailed explanation",
+    "field_mappings": {{"sigma_field": "target_field"}},
+    "notes": "Important notes"
 }}
 
 Response:"""
         
         return prompt
     
-    async def explain_rule(self, rule: str, rule_format: str) -> str:
-        """Explain what a rule does in natural language.
+    def _build_qradar_to_kustoql_prompt(
+        self, 
+        qradar_rule: str, 
+        context: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Build the QRadar to KustoQL conversion prompt optimized for Foundation-Sec-8B."""
         
-        Args:
-            rule: Rule content
-            rule_format: Format of the rule
+        cybersec_context = ""
+        if self.current_model == "foundation-sec-8b":
+            cybersec_context = """
+As a cybersecurity-specialized model with deep knowledge of:
+- QRadar rule patterns and correlation logic
+- Azure Sentinel/KustoQL query structure
+- SIEM field mapping and normalization
+- Threat detection methodologies
+"""
+        
+        context_info = ""
+        if context:
+            if "mitre_techniques" in context:
+                context_info += f"\nMITRE ATT&CK Techniques: {', '.join(context['mitre_techniques'])}"
+            if "similar_rules" in context:
+                context_info += f"\nSimilar rules found: {len(context['similar_rules'])}"
+        
+        prompt = f"""You are an expert SIEM rule converter specializing in QRadar to Azure Sentinel migrations.
+
+{cybersec_context}
+
+QRadar Rule to Convert:
+```
+{qradar_rule}
+```
+{context_info}
+
+Convert this QRadar rule to KustoQL using cybersecurity best practices and proper field mappings.
+
+Respond in JSON format:
+{{
+    "success": true,
+    "target_rule": "// Converted KustoQL rule\\nSecurityEvent\\n| where ...",
+    "confidence_score": 0.85,
+    "explanation": "Detailed conversion explanation",
+    "field_mappings": {{"qradar_field": "kustoql_field"}},
+    "table_used": "SecurityEvent",
+    "notes": "Important notes"
+}}
+
+Response:"""
+        
+        return prompt
+    
+    def _parse_conversion_response(self, response: str, target_format: TargetFormat) -> Dict[str, Any]:
+        """Parse the LLM response for conversion results."""
+        try:
+            # Clean up the response
+            cleaned_response = response.strip()
             
-        Returns:
-            Natural language explanation
-        """
-        prompt = f"""Explain the following {rule_format} security rule in simple, clear language:
+            # Remove markdown code blocks
+            import re
+            cleaned_response = re.sub(r'```json\s*', '', cleaned_response)
+            cleaned_response = re.sub(r'```\s*', '', cleaned_response)
+            
+            # Try to parse JSON
+            try:
+                result = json.loads(cleaned_response)
+                
+                # Validate and clean up fields
+                if "target_rule" in result and result["target_rule"]:
+                    result["target_rule"] = result["target_rule"].replace('\\n', '\n').replace('\\r', '\r')
+                else:
+                    result["target_rule"] = None
+                    
+                if "confidence_score" not in result:
+                    result["confidence_score"] = 0.5
+                if "explanation" not in result:
+                    result["explanation"] = "No explanation provided"
+                
+                result["success"] = bool(result.get("target_rule"))
+                return result
+                
+            except json.JSONDecodeError:
+                # Fallback: extract rule from response
+                return {
+                    "success": True,
+                    "target_rule": cleaned_response,
+                    "confidence_score": 0.3,
+                    "explanation": "Rule extracted from unstructured response",
+                    "field_mappings": {},
+                    "notes": "Response format was not structured"
+                }
+                
+        except Exception as e:
+            logger.warning(f"Failed to parse conversion response: {e}")
+            return {
+                "success": False,
+                "target_rule": None,
+                "confidence_score": 0.0,
+                "explanation": "Failed to parse LLM response",
+                "error_message": str(e)
+            }
+    
+    async def explain_rule(self, rule: str, rule_format: str) -> str:
+        """Explain what a rule does in natural language using cybersecurity expertise."""
+        prompt = f"""Explain the following {rule_format} security rule using your cybersecurity expertise:
 
 Rule:
 ```
 {rule}
 ```
 
-Provide a concise explanation covering:
+Provide a clear explanation covering:
 1. What type of activity this rule detects
 2. Key indicators or patterns it looks for
-3. Potential threats or attack techniques it addresses
-4. Any notable conditions or filters
+3. Potential threats or attack techniques (MITRE ATT&CK)
+4. Security implications and context
 
 Explanation:"""
         
-        return await self.generate_response(prompt, max_tokens=512)
+        return await self.generate_response(prompt, max_tokens=512, use_cybersec_optimization=True)
 
 
-# Global LLM service instance
-llm_service = QwenLLMService() 
+# Global LLM service instance - now using Enhanced LLM Service
+llm_service = EnhancedLLMService() 

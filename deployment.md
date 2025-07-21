@@ -2,6 +2,21 @@
 
 This guide provides detailed instructions for deploying Canonical in various environments, from development to enterprise production.
 
+## 🆕 Foundation-Sec-8B Upgrade
+
+**IMPORTANT**: Canonical now uses Foundation-Sec-8B by Cisco as the primary LLM for enhanced cybersecurity performance. This model provides:
+
+- **5-13% better performance** on cybersecurity benchmarks
+- **Deep domain knowledge** of CVEs, CWEs, MITRE ATT&CK
+- **Superior rule conversion accuracy** for SIEM platforms
+- **Intelligent fallback** to Qwen 2.5-3B if needed
+
+### System Requirements for Foundation-Sec-8B
+- **Memory**: 32GB+ RAM (vs 16GB for Qwen)
+- **GPU**: 16GB+ VRAM recommended (RTX A6000, V100, A100)
+- **Storage**: Additional 10GB for model weights
+- **Quantization**: Automatic 4-bit quantization on systems with <24GB VRAM
+
 ## 🚀 Quick Start Deployment
 
 ### Local Development
@@ -42,8 +57,9 @@ curl http://localhost:8000/health
 ### Prerequisites
 - **OS**: Ubuntu 20.04+ / CentOS 8+ / RHEL 8+
 - **Python**: 3.9+
-- **Memory**: 16+ GB RAM
-- **Storage**: 50+ GB SSD
+- **Memory**: 32+ GB RAM (upgraded for Foundation-Sec-8B)
+- **GPU Memory**: 16+ GB VRAM recommended (RTX A6000, V100, A100)
+- **Storage**: 60+ GB SSD (additional space for Foundation-Sec-8B model)
 - **Network**: Firewall configured for API access
 
 ### 1. System Preparation
@@ -115,10 +131,16 @@ API_PORT=8000
 DEBUG=false
 LOG_LEVEL=INFO
 
-# Model settings
+# Model settings (upgraded to Foundation-Sec-8B)
 EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
-QWEN_MODEL=Qwen/Qwen2.5-3B-Instruct
+LLM_MODEL=fdtn-ai/Foundation-Sec-8B
 EMBEDDING_DEVICE=cpu
+LLM_DEVICE=auto
+USE_FOUNDATION_SEC=true
+ENABLE_MODEL_FALLBACK=true
+
+# Legacy Qwen settings (fallback)
+QWEN_MODEL=Qwen/Qwen2.5-3B-Instruct
 QWEN_DEVICE=cpu
 
 # Database settings

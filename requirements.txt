@@ -5,7 +5,12 @@ sentence-transformers>=2.2.2
 transformers>=4.35.0
 torch>=2.1.0
 
-# Qwen model dependencies
+# Foundation-Sec-8B model dependencies (Llama-based)
+accelerate>=0.21.0
+bitsandbytes>=0.41.0
+safetensors>=0.3.0
+
+# Qwen model dependencies (legacy fallback)
 qwen-agent>=0.0.3
 modelscope>=1.9.0
 
@@ -44,10 +49,11 @@ pymupdf>=1.23.0
 # Optional: Mistral AI client (for enhanced processing)
 mistralai>=0.1.0
 
-# Optional: Accelerate for GPU optimization
-accelerate>=0.21.0
-
 # Optional: Jupyter for experimentation
 jupyter>=1.0.0
 matplotlib>=3.7.0
-seaborn>=0.12.0 
+seaborn>=0.12.0
+
+# Performance optimization for Foundation-Sec-8B
+optimum>=1.14.0
+# flash-attn>=2.0.0; platform_machine == "x86_64"  # Removed due to compilation issues 

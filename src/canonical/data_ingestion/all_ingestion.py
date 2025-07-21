@@ -66,7 +66,7 @@ async def ingest_all_data(force_refresh: bool = False) -> Dict[str, Any]:
         
         # Ingest Azure Sentinel Documentation
         logger.info("Starting Azure Sentinel documentation ingestion...")
-        azure_docs_success = await ingest_azure_docs(force_refresh)
+        azure_docs_success = await ingest_azure_docs()
         results["azure_docs"] = {"success": azure_docs_success}
         
         # Ingest QRadar Documentation
