@@ -1,0 +1,47 @@
+# ---- Rule 1 ----------------------------------------------------
+rule_name: Azure AD PowerShell Successful Sign-in
+kusto_query: |
+  SigninLogs
+  | where AppDisplayName contains "Azure Active Directory PowerShell"
+  | where TokenIssuerType == "AzureAD"
+  | where ResultType == 0
+  | project TimeGenerated, UserPrincipalName, AppDisplayName, ClientAppUsed, IPAddress
+required_tables: [SigninLogs]
+tactics: [InitialAccess]
+techniques: [T1078]
+severity: Medium
+
+---
+
+# ---- Rule 2 ----------------------------------------------------
+rule_name: Global Administrator Role Assignment
+kusto_query: |
+  AuditLogs
+  | where Category == "RoleManagement"
+  | where OperationName == "Add member to role"
+  | where Result == "success"
+  | mv-expand targetresources = tostring(TargetResources)
+  | extend modifiedproperties = todynamic(tostring(targetresources.modifiedProperties))
+  | mv-expand modifiedproperty = modifiedproperties
+  | where modifiedproperty.propertyName == "roleDefinitionId"
+  | where modifiedproperty.newValue == "\"Global Administrator\""
+  | project TimeGenerated, OperationName, Category, InitiatedBy, TargetResources
+required_tables: [AuditLogs]
+tactics: [PrivilegeEscalation, Persistence]
+techniques: [T1098]
+severity: High
+
+---
+
+# ---- Rule 3 ----------------------------------------------------
+rule_name: Authentication Methods Policy Modification
+kusto_query: |
+  MicrosoftGraphActivityLogs
+  | where RequestUri contains "authenticationMethodsPolicy"
+  | where RequestMethod == "PATCH"
+  | where ResponseStatusCode == 200
+  | project TimeGenerated, RequestUri, RequestMethod, ResponseStatusCode, IPAddress
+required_tables: [MicrosoftGraphActivityLogs]
+tactics: [DefenseEvasion]
+techniques: [T1562]
+severity: High 
