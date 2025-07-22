@@ -398,6 +398,18 @@ As a cybersecurity-specialized model, consider:
 - Common attack patterns and TTPs
 - Field standardization across SIEM platforms
 - Security context and threat intelligence
+
+MULTI-TABLE POLICY:
+• If context shows multiple tables for the SAME logical_source:
+  – mode: "union"  → return ONE analytic rule whose KQL uses `union isfuzzy=true TableA, TableB`.
+  – mode: "split"  → return SEPARATE YAML blocks, one per table, no `union`.
+  – If only one table present → ignore mode, behave normally.
+• Analyze metadata, schema relationships, and security context to intelligently decide between union/split.
+• Base decisions on: logical relationships, query complexity, field overlap, security context, best practices.
+
+STRICT GROUNDING:
+Base every answer ONLY on retrieved context (<CTX>).
+If information is missing, reply exactly "NO MAPPING".
 """
         
         format_descriptions = {
@@ -415,6 +427,8 @@ As a cybersecurity-specialized model, consider:
                 context_info += f"\nMITRE ATT&CK Techniques: {', '.join(context['mitre_techniques'])}"
             if "similar_rules" in context:
                 context_info += f"\nSimilar rules found: {len(context['similar_rules'])}"
+            if "retrieved_context" in context:
+                context_info += f"\n<CTX>\n{context['retrieved_context']}\n</CTX>"
         
         prompt = f"""You are an expert SIEM rule converter with deep cybersecurity knowledge. Convert the following Sigma rule to {format_descriptions[target_format]}.
 
@@ -433,17 +447,28 @@ Instructions:
 2. Map Sigma fields to the target format's field names
 3. Convert conditions and operators appropriately
 4. Maintain the detection logic and intent
-5. Apply cybersecurity best practices
+5. Apply cybersecurity best practices and Multi-Table Policy
 6. Provide a confidence score (0.0-1.0)
-7. Explain the conversion process
+7. Explain the conversion process and multi-table decisions
+
+OUTPUT FORMAT:
+Return valid YAML; each rule block must include:
+rule_name, kusto_query, required_tables, tactics (ATT&CK), techniques, severity.
+
+If multiple tables detected for same logical_source, decide intelligently:
+- Union mode: Single rule with `union isfuzzy=true TableA, TableB`
+- Split mode: Separate YAML blocks per table
 
 Respond in JSON format:
 {{
     "success": true,
     "target_rule": "converted rule here",
     "confidence_score": 0.95,
-    "explanation": "Detailed explanation",
+    "explanation": "Detailed explanation including multi-table decision rationale",
     "field_mappings": {{"sigma_field": "target_field"}},
+    "required_tables": ["SecurityEvent"],
+    "multi_table_mode": "union|split|single",
+    "multi_table_rationale": "Explanation of union/split decision",
     "notes": "Important notes"
 }}
 
@@ -466,6 +491,18 @@ As a cybersecurity-specialized model with deep knowledge of:
 - Azure Sentinel/KustoQL query structure
 - SIEM field mapping and normalization
 - Threat detection methodologies
+
+MULTI-TABLE POLICY:
+• If context shows multiple tables for the SAME logical_source:
+  – mode: "union"  → return ONE analytic rule whose KQL uses `union isfuzzy=true TableA, TableB`.
+  – mode: "split"  → return SEPARATE YAML blocks, one per table, no `union`.
+  – If only one table present → ignore mode, behave normally.
+• Analyze metadata, schema relationships, and security context to intelligently decide between union/split.
+• Base decisions on: logical relationships, query complexity, field overlap, security context, best practices.
+
+STRICT GROUNDING:
+Base every answer ONLY on retrieved context (<CTX>).
+If information is missing, reply exactly "NO MAPPING".
 """
         
         context_info = ""
@@ -474,6 +511,8 @@ As a cybersecurity-specialized model with deep knowledge of:
                 context_info += f"\nMITRE ATT&CK Techniques: {', '.join(context['mitre_techniques'])}"
             if "similar_rules" in context:
                 context_info += f"\nSimilar rules found: {len(context['similar_rules'])}"
+            if "retrieved_context" in context:
+                context_info += f"\n<CTX>\n{context['retrieved_context']}\n</CTX>"
         
         prompt = f"""You are an expert SIEM rule converter specializing in QRadar to Azure Sentinel migrations.
 
@@ -486,15 +525,26 @@ QRadar Rule to Convert:
 {context_info}
 
 Convert this QRadar rule to KustoQL using cybersecurity best practices and proper field mappings.
+Apply the Multi-Table Policy intelligently based on the context and metadata.
+
+OUTPUT FORMAT:
+Return valid YAML; each rule block must include:
+rule_name, kusto_query, required_tables, tactics (ATT&CK), techniques, severity.
+
+If multiple tables detected for same logical_source, decide intelligently:
+- Union mode: Single rule with `union isfuzzy=true TableA, TableB`
+- Split mode: Separate YAML blocks per table
 
 Respond in JSON format:
 {{
     "success": true,
     "target_rule": "// Converted KustoQL rule\\nSecurityEvent\\n| where ...",
     "confidence_score": 0.85,
-    "explanation": "Detailed conversion explanation",
+    "explanation": "Detailed conversion explanation including multi-table decision rationale",
     "field_mappings": {{"qradar_field": "kustoql_field"}},
-    "table_used": "SecurityEvent",
+    "required_tables": ["SecurityEvent"],
+    "multi_table_mode": "union|split|single",
+    "multi_table_rationale": "Explanation of union/split decision",
     "notes": "Important notes"
 }}
 

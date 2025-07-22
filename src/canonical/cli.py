@@ -29,6 +29,8 @@ from .data_ingestion.atomic_ingestion import atomic_ingestion
 from .data_ingestion.azure_sentinel_ingestion import AzureSentinelIngestion
 from .data_ingestion.qradar_docs_ingestion import qradar_docs_ingestion
 from .data_ingestion.all_ingestion import ingest_all_data
+from .data_ingestion.ecs_ingestion import ecs_ingestion
+from .data_ingestion.custom_tables_ingestion import custom_tables_ingestion
 
 
 @click.group()
@@ -561,6 +563,64 @@ def ingest_qradar_docs(force_refresh: bool):
             sys.exit(1)
     
     asyncio.run(_ingest())
+
+
+@data.command()
+@click.option('--force-refresh', is_flag=True, help='Force refresh of collection')
+def ingest_ecs(force_refresh: bool):
+    """Ingest Elastic Common Schema (ECS) field reference documentation."""
+    async def _ingest():
+        try:
+            click.echo("🚀 Starting ECS field reference ingestion...")
+            
+            stats = await ecs_ingestion.ingest_ecs_fields(force_refresh=force_refresh)
+            
+            if stats.get('skipped'):
+                click.echo(f"⏭️  ECS collection already exists with {stats['total_documents']} documents")
+                click.echo("   Use --force-refresh to reload the data")
+            else:
+                click.echo(f"✅ ECS field reference ingestion completed:")
+                click.echo(f"  Field sets processed: {stats['field_sets_processed']}")
+                click.echo(f"  Total documents: {stats['total_documents']}")
+                click.echo(f"  Successful: {stats['successful']}")
+                click.echo(f"  Failed: {stats['failed']}")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            logger.error(f"ECS ingestion error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
+@data.command()
+@click.argument('json_path', type=click.Path(exists=True))
+@click.option('--force-refresh', is_flag=True, help='Force refresh of collection')
+def ingest_custom_tables(json_path: str, force_refresh: bool):
+    """Ingest custom table schemas from JSON file for deployment-ready rule conversion."""
+    async def _ingest():
+        try:
+            click.echo(f"🚀 Starting custom tables ingestion from: {json_path}")
+            
+            stats = await custom_tables_ingestion.ingest_custom_tables(json_path, force_refresh=force_refresh)
+            
+            if stats.get('skipped'):
+                click.echo(f"⏭️  Custom tables already exist ({stats['total_documents']} documents)")
+                click.echo("   Use --force-refresh to reload the data")
+            else:
+                click.echo(f"✅ Custom tables ingestion completed:")
+                click.echo(f"  Tables processed: {stats['tables_processed']}")
+                click.echo(f"  Total documents: {stats['total_documents']}")
+                click.echo(f"  Successful: {stats['successful']}")
+                click.echo(f"  Failed: {stats['failed']}")
+                click.echo(f"  🎯 Tables are now available for deployment-ready rule conversion!")
+            
+        except Exception as e:
+            click.echo(f"❌ Ingestion failed: {e}")
+            logger.error(f"Custom tables ingestion error: {e}")
+            sys.exit(1)
+    
+    asyncio.run(_ingest())
+
 
 
 @cli.command()

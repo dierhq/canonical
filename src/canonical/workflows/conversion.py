@@ -88,10 +88,10 @@ class ConversionWorkflow:
                 logger.info(f"Successfully parsed Sigma rule: {parsed_rule.title}")
             elif request.source_format.value == "qradar":
                 # Parse QRadar rule
-                from ..parsers.qradar import qradar_parser
+                from ..parsers.qradar_parser import qradar_parser
                 parsed_rule = qradar_parser.parse_rule(request.source_rule)
-                state["parsed_rule"] = qradar_parser.convert_to_dict(parsed_rule)
-                logger.info(f"Successfully parsed QRadar rule: {parsed_rule.name}")
+                state["parsed_rule"] = parsed_rule
+                logger.info(f"Successfully parsed QRadar rule: {parsed_rule.get('rule_name', 'Unknown')}")
             elif request.source_format.value == "kibanaql":
                 # Parse KibanaQL rule
                 from ..parsers.kibanaql import KibanaQLParser
@@ -223,25 +223,44 @@ class ConversionWorkflow:
         return state
     
     async def _convert_rule_node(self, state: ConversionState) -> ConversionState:
-        """Convert the rule using the enhanced LLM."""
+        """Convert the rule using specialized converters or enhanced LLM."""
         try:
-            logger.info("Converting rule with enhanced LLM")
+            logger.info("Converting rule with specialized converter or enhanced LLM")
             
             if state.get("error"):
                 return state
             
             request = state["request"]
             
-            # Use enhanced LLM service with retry logic
-            conversion_result = await enhanced_llm_service.convert_with_retry(
-                source_rule=request.source_rule,
-                source_format=request.source_format.value,
-                target_format=request.target_format.value,
-                max_retries=2
-            )
+            # Check if we should use specialized converters first
+            if (request.source_format.value == "qradar" and 
+                request.target_format.value == "kustoql"):
+                logger.info("Using specialized QRadar to KustoQL converter")
+                # Use specialized QRadar to KustoQL converter
+                from ..workflows.qradar_to_kustoql import qradar_to_kustoql_converter
+                conversion_response = await qradar_to_kustoql_converter.convert_rule(request)
+                conversion_result = {
+                    "success": conversion_response.success,
+                    "target_rule": conversion_response.target_rule,
+                    "confidence_score": conversion_response.confidence_score,
+                    "explanation": conversion_response.explanation,
+                    "mitre_techniques": conversion_response.mitre_techniques,
+                    "field_mappings": conversion_response.field_mappings,
+                    "conversion_notes": conversion_response.conversion_notes,
+                    "metadata": getattr(conversion_response, 'metadata', {})
+                }
+            else:
+                logger.info("Using enhanced LLM service for conversion")
+                # Use enhanced LLM service with retry logic
+                conversion_result = await enhanced_llm_service.convert_with_retry(
+                    source_rule=request.source_rule,
+                    source_format=request.source_format.value,
+                    target_format=request.target_format.value,
+                    max_retries=2
+                )
             
             state["conversion_result"] = conversion_result
-            logger.info("Enhanced rule conversion completed")
+            logger.info("Rule conversion completed")
             
         except Exception as e:
             logger.error(f"Failed to convert rule with enhanced LLM: {e}")
@@ -257,13 +276,21 @@ class ConversionWorkflow:
                     "context_data": state.get("context_data", {})
                 }
                 
-                # Use original LLM service
+                # Use original LLM service or specialized converters
                 if (request.source_format.value == "qradar" and 
                     request.target_format.value == "kustoql"):
-                    conversion_result = await llm_service.convert_qradar_to_kustoql(
-                        qradar_rule=request.source_rule,
-                        context=context
-                    )
+                    # Use specialized QRadar to KustoQL converter
+                    from ..workflows.qradar_to_kustoql import qradar_to_kustoql_converter
+                    conversion_response = await qradar_to_kustoql_converter.convert_rule(request)
+                    conversion_result = {
+                        "success": conversion_response.success,
+                        "target_rule": conversion_response.target_rule,
+                        "confidence_score": conversion_response.confidence_score,
+                        "explanation": conversion_response.explanation,
+                        "mitre_techniques": conversion_response.mitre_techniques,
+                        "field_mappings": conversion_response.field_mappings,
+                        "conversion_notes": conversion_response.conversion_notes
+                    }
                 else:
                     conversion_result = await llm_service.convert_sigma_rule(
                         sigma_rule=request.source_rule,
@@ -398,19 +425,27 @@ class ConversionWorkflow:
                 conversion_result = state.get("conversion_result", {})
                 
                 # Create successful response
+                # Merge existing metadata with workflow metadata
+                base_metadata = {
+                    "similar_rules_found": len(state.get("similar_rules", [])),
+                    "context_data_available": bool(state.get("context_data")),
+                    "field_mappings": conversion_result.get("field_mappings", {}),
+                    "notes": conversion_result.get("notes", "")
+                }
+                # Preserve specialized converter metadata
+                specialized_metadata = conversion_result.get("metadata", {})
+                merged_metadata = {**base_metadata, **specialized_metadata}
+                
                 response = ConversionResponse(
                     success=conversion_result.get("success", False),
                     target_rule=conversion_result.get("target_rule"),
                     confidence_score=conversion_result.get("confidence_score", 0.0),
                     explanation=conversion_result.get("explanation", ""),
                     mitre_techniques=state.get("mitre_techniques", []),
+                    field_mappings=conversion_result.get("field_mappings", {}),
+                    conversion_notes=conversion_result.get("conversion_notes", []),
                     error_message=conversion_result.get("error_message"),
-                    metadata={
-                        "similar_rules_found": len(state.get("similar_rules", [])),
-                        "context_data_available": bool(state.get("context_data")),
-                        "field_mappings": conversion_result.get("field_mappings", {}),
-                        "notes": conversion_result.get("notes", "")
-                    }
+                    metadata=merged_metadata
                 )
             
             state["response"] = response

@@ -137,6 +137,21 @@ class RuleConverter:
             target_format=TargetFormat.EQL
         )
     
+    async def convert_qradar_to_kustoql(self, qradar_rule: str) -> ConversionResponse:
+        """Convert QRadar rule to KustoQL.
+        
+        Args:
+            qradar_rule: QRadar rule content
+            
+        Returns:
+            Conversion response
+        """
+        return await self.convert_rule(
+            source_rule=qradar_rule,
+            source_format=SourceFormat.QRADAR,
+            target_format=TargetFormat.KUSTOQL
+        )
+
     async def convert_sigma_to_qradar(self, sigma_rule: str) -> ConversionResponse:
         """Convert Sigma rule to QRadar AQL.
         

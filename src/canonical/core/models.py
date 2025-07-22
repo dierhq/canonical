@@ -73,6 +73,8 @@ class ConversionResponse(BaseModel):
     confidence_score: Optional[float] = Field(None, description="Confidence score of the conversion")
     explanation: Optional[str] = Field(None, description="Explanation of the conversion process")
     mitre_techniques: List[str] = Field(default_factory=list, description="Associated MITRE ATT&CK techniques")
+    field_mappings: Dict[str, str] = Field(default_factory=dict, description="Field mappings used in conversion")
+    conversion_notes: List[str] = Field(default_factory=list, description="Notes about the conversion process")
     error_message: Optional[str] = Field(None, description="Error message if conversion failed")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
