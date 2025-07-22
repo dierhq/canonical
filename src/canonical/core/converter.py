@@ -453,9 +453,15 @@ class RuleConverter:
         try:
             from ..services.chromadb import chromadb_service
             
-            # Get collection statistics
+            # Get collection statistics for ALL collections
             collections_stats = {}
-            for collection_name in ["sigma_rules", "mitre_attack", "mitre_car", "atomic_red_team"]:
+            
+            # Initialize ChromaDB service and get all collections
+            await chromadb_service.initialize()
+            all_collections = chromadb_service.client.list_collections()
+            
+            for collection in all_collections:
+                collection_name = collection.name
                 try:
                     stats = await chromadb_service.get_collection_stats(collection_name)
                     collections_stats[collection_name] = stats
@@ -465,6 +471,8 @@ class RuleConverter:
             return {
                 "initialized": self._initialized,
                 "collections": collections_stats,
+                "total_collections": len(collections_stats),
+                "total_documents": sum(stats.get("count", 0) for stats in collections_stats.values() if isinstance(stats, dict) and "count" in stats),
                 "supported_formats": await self.get_supported_formats()
             }
         except Exception as e:
