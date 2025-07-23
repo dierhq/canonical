@@ -103,6 +103,20 @@ class Settings(BaseSettings):
     max_concurrent_requests: int = Field(default=10, env="MAX_CONCURRENT_REQUESTS")
     request_timeout: int = Field(default=300, env="REQUEST_TIMEOUT")
     
+    # Rule Enhancement Settings
+    ENABLE_RULE_ENHANCEMENT: bool = Field(
+        default=True, 
+        description="Enable universal rule enhancement preprocessing"
+    )
+    ENHANCEMENT_SKIP_STRUCTURED: bool = Field(
+        default=True,
+        description="Skip enhancement for rules that are already well-structured"
+    )
+    ENHANCEMENT_FALLBACK_ON_ERROR: bool = Field(
+        default=True,
+        description="Fallback to original rule if enhancement fails"
+    )
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

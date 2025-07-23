@@ -19,6 +19,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from loguru import logger
 
 from ..core.models import ConversionRequest, ConversionResponse, TargetFormat
+from ..core.rule_enhancer import universal_enhancer
 from ..parsers.sigma import sigma_parser
 from ..services.embedding import embedding_service
 from ..services.chromadb import chromadb_service
@@ -30,6 +31,7 @@ from ..services.hybrid_retrieval import hybrid_retrieval_service
 class ConversionState(TypedDict):
     """State for the conversion workflow."""
     request: ConversionRequest
+    enhanced_rule: Optional[str]  # NEW: Enhanced rule after preprocessing
     parsed_rule: Optional[Dict[str, Any]]
     mitre_techniques: List[str]
     similar_rules: List[Dict[str, Any]]
@@ -53,7 +55,8 @@ class ConversionWorkflow:
         # Create the workflow graph
         workflow = StateGraph(ConversionState)
         
-        # Add nodes
+        # Add nodes - NEW: preprocessing node added first
+        workflow.add_node("preprocess_rule", self._preprocess_rule_node)  # NEW
         workflow.add_node("parse_rule", self._parse_rule_node)
         workflow.add_node("extract_mitre", self._extract_mitre_node)
         workflow.add_node("find_similar", self._find_similar_node)
@@ -62,8 +65,9 @@ class ConversionWorkflow:
         workflow.add_node("validate_result", self._validate_result_node)
         workflow.add_node("create_response", self._create_response_node)
         
-        # Define the flow
-        workflow.set_entry_point("parse_rule")
+        # Define the flow - NEW: preprocess first
+        workflow.set_entry_point("preprocess_rule")  # NEW
+        workflow.add_edge("preprocess_rule", "parse_rule")  # NEW
         workflow.add_edge("parse_rule", "extract_mitre")
         workflow.add_edge("extract_mitre", "find_similar")
         workflow.add_edge("find_similar", "gather_context")
@@ -75,38 +79,84 @@ class ConversionWorkflow:
         # Compile the workflow
         self.workflow = workflow.compile(checkpointer=self.memory)
     
-    async def _parse_rule_node(self, state: ConversionState) -> ConversionState:
-        """Parse the source rule."""
+    async def _preprocess_rule_node(self, state: ConversionState) -> ConversionState:
+        """NEW: Preprocess and enhance the source rule."""
         try:
-            logger.info("Parsing source rule")
             request = state["request"]
+            logger.info(f"Preprocessing {request.source_format.value} rule")
+            
+            # Import settings here to avoid circular imports
+            from ..core.config import settings
+            
+            # Check if enhancement is enabled
+            if not settings.ENABLE_RULE_ENHANCEMENT:
+                logger.info("Rule enhancement disabled, using original rule")
+                state["enhanced_rule"] = request.source_rule
+                return state
+            
+            # Check if enhancement is needed
+            needs_enhancement = universal_enhancer.is_enhancement_needed(request.source_rule, request.source_format)
+            
+            if needs_enhancement or not settings.ENHANCEMENT_SKIP_STRUCTURED:
+                logger.info("Applying universal rule enhancer")
+                enhanced_rule = universal_enhancer.enhance_rule(request.source_rule, request.source_format)
+                state["enhanced_rule"] = enhanced_rule
+                logger.info("Rule successfully enhanced with structured metadata")
+            else:
+                logger.info("Rule already well-structured, skipping enhancement")
+                state["enhanced_rule"] = request.source_rule
+            
+            return state
+            
+        except Exception as e:
+            logger.error(f"Failed to preprocess rule: {e}")
+            
+            # Import settings for fallback behavior
+            from ..core.config import settings
+            
+            if settings.ENHANCEMENT_FALLBACK_ON_ERROR:
+                logger.info("Falling back to original rule")
+                state["enhanced_rule"] = state["request"].source_rule
+            else:
+                # Propagate the error
+                state["error"] = f"Rule preprocessing failed: {str(e)}"
+            
+            return state
+    
+    async def _parse_rule_node(self, state: ConversionState) -> ConversionState:
+        """Parse the source rule (now using enhanced version)."""
+        try:
+            logger.info("Parsing enhanced rule")
+            request = state["request"]
+            enhanced_rule = state["enhanced_rule"]  # Use enhanced version
             
             if request.source_format.value == "sigma":
                 # Parse Sigma rule
-                parsed_rule = sigma_parser.parse_rule(request.source_rule)
+                parsed_rule = sigma_parser.parse_rule(enhanced_rule)  # Use enhanced
                 state["parsed_rule"] = sigma_parser.convert_to_dict(parsed_rule)
                 logger.info(f"Successfully parsed Sigma rule: {parsed_rule.title}")
             elif request.source_format.value == "qradar":
                 # Parse QRadar rule
                 from ..parsers.qradar_parser import qradar_parser
-                parsed_rule = qradar_parser.parse_rule(request.source_rule)
+                parsed_rule = qradar_parser.parse_rule(enhanced_rule)  # Use enhanced
                 state["parsed_rule"] = parsed_rule
                 logger.info(f"Successfully parsed QRadar rule: {parsed_rule.get('rule_name', 'Unknown')}")
             elif request.source_format.value == "kibanaql":
                 # Parse KibanaQL rule
                 from ..parsers.kibanaql import KibanaQLParser
                 kibanaql_parser = KibanaQLParser()
-                parsed_rule = kibanaql_parser.parse_rule(request.source_rule)
+                parsed_rule = kibanaql_parser.parse_rule(enhanced_rule)  # Use enhanced
                 state["parsed_rule"] = kibanaql_parser.convert_to_dict(parsed_rule)
                 logger.info(f"Successfully parsed KibanaQL rule: {parsed_rule.name}")
             else:
                 raise ValueError(f"Unsupported source format: {request.source_format}")
             
+            return state
+            
         except Exception as e:
             logger.error(f"Failed to parse rule: {e}")
             state["error"] = f"Rule parsing failed: {str(e)}"
-        
-        return state
+            return state
     
     async def _extract_mitre_node(self, state: ConversionState) -> ConversionState:
         """Extract MITRE ATT&CK techniques from the rule."""
@@ -483,6 +533,7 @@ class ConversionWorkflow:
             # Create initial state
             initial_state = ConversionState(
                 request=request,
+                enhanced_rule=None, # NEW: Initialize enhanced_rule
                 parsed_rule=None,
                 mitre_techniques=[],
                 similar_rules=[],
