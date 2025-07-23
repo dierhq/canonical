@@ -286,9 +286,15 @@ class ConversionWorkflow:
             if (request.source_format.value == "qradar" and 
                 request.target_format.value == "kustoql"):
                 logger.info("Using specialized QRadar to KustoQL converter")
-                # Use specialized QRadar to KustoQL converter
+                # Use specialized QRadar to KustoQL converter with enhanced rule
                 from ..workflows.qradar_to_kustoql import qradar_to_kustoql_converter
-                conversion_response = await qradar_to_kustoql_converter.convert_rule(request)
+                # Create a new request with the enhanced rule
+                enhanced_request = ConversionRequest(
+                    source_rule=state["enhanced_rule"],  # Use enhanced rule
+                    source_format=request.source_format,
+                    target_format=request.target_format
+                )
+                conversion_response = await qradar_to_kustoql_converter.convert_rule(enhanced_request)
                 conversion_result = {
                     "success": conversion_response.success,
                     "target_rule": conversion_response.target_rule,
@@ -329,9 +335,15 @@ class ConversionWorkflow:
                 # Use original LLM service or specialized converters
                 if (request.source_format.value == "qradar" and 
                     request.target_format.value == "kustoql"):
-                    # Use specialized QRadar to KustoQL converter
+                    # Use specialized QRadar to KustoQL converter with enhanced rule
                     from ..workflows.qradar_to_kustoql import qradar_to_kustoql_converter
-                    conversion_response = await qradar_to_kustoql_converter.convert_rule(request)
+                    # Create a new request with the enhanced rule for fallback too
+                    enhanced_fallback_request = ConversionRequest(
+                        source_rule=state.get("enhanced_rule", request.source_rule),  # Use enhanced rule if available
+                        source_format=request.source_format,
+                        target_format=request.target_format
+                    )
+                    conversion_response = await qradar_to_kustoql_converter.convert_rule(enhanced_fallback_request)
                     conversion_result = {
                         "success": conversion_response.success,
                         "target_rule": conversion_response.target_rule,

@@ -36,7 +36,7 @@ class HybridRetrievalService:
         
         try:
             # Search for similar rules and examples
-            semantic_results = await self._semantic_search(rule_content, max_results)
+            semantic_results = await self._semantic_search(rule_content, max_results, "azure_sentinel_detections")
             
             # Search for format-specific examples
             format_results = await self._format_specific_search(source_format, target_format, max_results)
@@ -60,15 +60,13 @@ class HybridRetrievalService:
                 "error": str(e)
             }
     
-    async def _semantic_search(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+    async def _semantic_search(self, query: str, max_results: int, collection_name: str = "sigma_rules") -> List[Dict[str, Any]]:
         """Perform semantic search using embeddings."""
         try:
-            # Generate embedding for the query
-            query_embedding = await self.embedding_service.embed_text(query)
-            
             # Search in ChromaDB
             results = await self.chromadb_service.search_similar(
-                query_embedding=query_embedding,
+                collection_name=collection_name,
+                query=query,
                 n_results=max_results
             )
             
@@ -88,7 +86,7 @@ class HybridRetrievalService:
         try:
             # Search for examples of the target format
             format_query = f"{target_format} examples rules"
-            format_results = await self._semantic_search(format_query, max_results)
+            format_results = await self._semantic_search(format_query, max_results, "azure_sentinel_detections")
             
             return format_results
             

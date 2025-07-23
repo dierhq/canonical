@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # ChromaDB settings
     chromadb_host: str = Field(default="localhost", env="CHROMADB_HOST")
     chromadb_port: int = Field(default=8000, env="CHROMADB_PORT")
-    chromadb_path: str = Field(default="./data/chromadb", env="CHROMADB_PATH")
+    chromadb_path: str = Field(default="./canonical/data-volume/chromadb", env="CHROMADB_PATH")
     
     # Collection names
     sigma_collection: str = Field(default="sigma_rules", env="SIGMA_COLLECTION")

@@ -23,9 +23,17 @@ class QRadarRuleParser:
     def __init__(self):
         """Initialize the QRadar parser."""
         self.rule_patterns = {
-            'rule_description': r'Rule Description\s*\n(.*?)(?=\n\s*Rule Actions|$)',
-            'rule_actions': r'Rule Actions\s*\n(.*?)(?=\n\s*Rule Responses|$)',
-            'rule_responses': r'Rule Responses\s*\n(.*?)(?=\n\s*Note:|$)',
+            'rule_name': r'Rule Name\s*:\s*(.+?)(?=\n|$)',
+            'rule_description': r'Rule Description\s*:\s*(.+?)(?=\n\s*Rule Type|$)',
+            'rule_type': r'Rule Type\s*:\s*(.+?)(?=\n|$)',
+            'enabled': r'Enabled\s*:\s*(.+?)(?=\n|$)',
+            'severity': r'Severity\s*:\s*(\d+)',
+            'credibility': r'Credibility\s*:\s*(\d+)',
+            'relevance': r'Relevance\s*:\s*(\d+)',
+            'category': r'Category\s*:\s*(.+?)(?=\n|$)',
+            'conditions': r'(?:Rule Type.*?\n.*?\n.*?\n.*?\n.*?\n.*?\n)(.*?)(?=\n\s*Rule Actions|$)',
+            'rule_actions': r'Rule Actions\s*:\s*\n(.*?)(?=\n\s*Rule Responses|$)',
+            'rule_responses': r'Rule Responses\s*:\s*\n(.*?)(?=\n\s*Note:|$)',
         }
         
         self.condition_patterns = {
@@ -57,8 +65,9 @@ class QRadarRuleParser:
             # Extract main sections
             sections = self._extract_sections(cleaned_text)
             
-            # Parse rule description conditions
-            conditions = self._parse_conditions(sections.get('rule_description', ''))
+            # Parse conditions from the conditions section (not description)
+            conditions_text = sections.get('conditions', '')
+            conditions = self._parse_conditions(conditions_text)
             
             # Parse actions and responses
             actions = self._parse_actions(sections.get('rule_actions', ''))
@@ -67,12 +76,18 @@ class QRadarRuleParser:
             # Build structured rule
             parsed_rule = {
                 'raw_text': rule_text,
-                'rule_name': self._extract_rule_name(sections.get('rule_description', '')),
+                'rule_name': sections.get('rule_name', '').strip(),
                 'description': sections.get('rule_description', '').strip(),
+                'rule_type': sections.get('rule_type', '').strip(),
+                'enabled': sections.get('enabled', '').strip(),
+                'severity': int(sections.get('severity', '0')) if sections.get('severity') else None,
+                'credibility': int(sections.get('credibility', '0')) if sections.get('credibility') else None,
+                'relevance': int(sections.get('relevance', '0')) if sections.get('relevance') else None,
+                'category': sections.get('category', '').strip(),
                 'conditions': conditions,
                 'actions': actions,
                 'responses': responses,
-                'metadata': self._extract_metadata(responses)
+                'metadata': self._extract_metadata_from_sections(sections, responses)
             }
             
             logger.debug(f"Successfully parsed QRadar rule: {parsed_rule['rule_name']}")
@@ -182,6 +197,19 @@ class QRadarRuleParser:
                 'pattern': custom_match.group(2).strip()
             })
         
+        # Also look for the enhanced format: "when any of DNS Query (custom) match"
+        enhanced_custom_match = re.search(r'when any of\s+(.+?)\s+match\s+(.+?)(?:\n|$)', description, re.IGNORECASE)
+        if enhanced_custom_match:
+            field_name = enhanced_custom_match.group(1).strip()
+            pattern = enhanced_custom_match.group(2).strip()
+            # Remove quotes if present
+            pattern = pattern.strip('"\'')
+            conditions.append({
+                'type': 'custom_field_match',
+                'field': field_name,
+                'pattern': pattern
+            })
+        
         return conditions
     
     def _parse_actions(self, actions_text: str) -> List[Dict[str, Any]]:
@@ -268,6 +296,34 @@ class QRadarRuleParser:
                 if 'severity' in response:
                     metadata['severity'] = response['severity']
                 if 'high_level_category' in response:
+                    metadata['category'] = response['high_level_category']
+        
+        return metadata
+    
+    def _extract_metadata_from_sections(self, sections: Dict[str, str], responses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Extract metadata from both sections and responses."""
+        metadata = {}
+        
+        # Extract from sections (enhanced rule format)
+        if sections.get('severity'):
+            metadata['severity'] = int(sections['severity'])
+        if sections.get('credibility'):
+            metadata['credibility'] = int(sections['credibility'])
+        if sections.get('relevance'):
+            metadata['relevance'] = int(sections['relevance'])
+        if sections.get('category'):
+            metadata['category'] = sections['category']
+        if sections.get('rule_type'):
+            metadata['rule_type'] = sections['rule_type']
+        if sections.get('enabled'):
+            metadata['enabled'] = sections['enabled']
+        
+        # Also extract from responses (legacy)
+        for response in responses:
+            if response.get('type') == 'dispatch_event':
+                if 'severity' in response and 'severity' not in metadata:
+                    metadata['severity'] = response['severity']
+                if 'high_level_category' in response and 'category' not in metadata:
                     metadata['category'] = response['high_level_category']
         
         return metadata
