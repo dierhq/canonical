@@ -39,18 +39,19 @@ class EnhancedLLMService:
                 source_fmt = SourceFormat(source_format) if source_format != "sigma" else SourceFormat.SIGMA
                 target_fmt = TargetFormat(target_format)
                 
-                # Use the appropriate conversion method based on source format
+                # Use unified conversion methods - no hardcoded format-specific paths
                 if source_fmt == SourceFormat.SIGMA:
                     result = await self.llm_service.convert_sigma_rule(
                         sigma_rule=source_rule,
                         target_format=target_fmt
                     )
                 elif source_fmt == SourceFormat.QRADAR:
-                    result = await self.llm_service.convert_qradar_to_kustoql(
-                        qradar_rule=source_rule
+                    result = await self.llm_service.convert_qradar_rule(
+                        qradar_rule=source_rule,
+                        target_format=target_fmt  # Support ANY target format
                     )
                 else:
-                    # Fallback to general conversion
+                    # For other formats, use sigma conversion as fallback
                     result = await self.llm_service.convert_sigma_rule(
                         sigma_rule=source_rule,
                         target_format=target_fmt
