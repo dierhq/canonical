@@ -10,15 +10,17 @@ For licensing inquiries, contact: licensing@dier.org
 
 """
 QRadar rule parser for extracting structured information from QRadar rule text.
+Enhanced with Foundation-Sec-8B for intelligent correlation pattern detection.
 """
 
 import re
+import asyncio
 from typing import Dict, List, Any, Optional
 from loguru import logger
 
 
 class QRadarRuleParser:
-    """Parser for QRadar rule text format."""
+    """Parser for QRadar rule text format with AI-powered correlation detection."""
     
     def __init__(self):
         """Initialize the QRadar parser."""
@@ -36,6 +38,7 @@ class QRadarRuleParser:
             'rule_responses': r'Rule Responses\s*:\s*\n(.*?)(?=\n\s*Note:|$)',
         }
         
+        # Legacy patterns kept for fallback only
         self.condition_patterns = {
             'apply_rule': r'Apply\s+(.+?)\s+on\s+(.+?)(?:\s+and|$)',
             'event_category': r'event category.*?is one of the following\s+(.+?)(?:\s+and|$)',
@@ -46,7 +49,167 @@ class QRadarRuleParser:
             'regex_match': r'match\s+(.+?)(?:\s+and|$)',
             'custom_field': r'when any of\s+(.+?)\s+match\s+(.+?)(?:\s+and|$)',
         }
+        
+        # AI-powered parsing flag
+        self._llm_service = None
     
+    def _get_llm_service(self):
+        """Get LLM service instance for AI-powered parsing."""
+        if self._llm_service is None:
+            from ..services.llm import llm_service
+            self._llm_service = llm_service
+        return self._llm_service
+    
+    async def parse_rule_intelligent(self, rule_text: str) -> Dict[str, Any]:
+        """Parse QRadar rule using Foundation-Sec-8B intelligence.
+        
+        Args:
+            rule_text: Raw QRadar rule text
+            
+        Returns:
+            Parsed rule structure with AI-detected correlation patterns
+        """
+        try:
+            logger.info("Parsing QRadar rule with Foundation-Sec-8B intelligence")
+            
+            # First do basic parsing
+            basic_parsed = self.parse_rule(rule_text)
+            
+            # Then enhance with AI-powered correlation detection
+            correlation_patterns = await self._detect_correlation_patterns_ai(rule_text)
+            
+            # Merge AI insights with basic parsing
+            basic_parsed['correlation_patterns'] = correlation_patterns
+            basic_parsed['ai_enhanced'] = True
+            
+            logger.info(f"AI-enhanced parsing completed for: {basic_parsed['rule_name']}")
+            return basic_parsed
+            
+        except Exception as e:
+            logger.error(f"AI-enhanced parsing failed, falling back to basic parsing: {e}")
+            return self.parse_rule(rule_text)
+    
+    async def _detect_correlation_patterns_ai(self, rule_text: str) -> Dict[str, Any]:
+        """Use Foundation-Sec-8B to detect correlation patterns in QRadar rules.
+        
+        Args:
+            rule_text: Raw QRadar rule text
+            
+        Returns:
+            Detected correlation patterns and metadata
+        """
+        try:
+            llm_service = self._get_llm_service()
+            
+            prompt = f"""You are a cybersecurity expert analyzing QRadar rules to extract correlation patterns for KustoQL conversion.
+
+QRADAR RULE:
+{rule_text}
+
+Analyze this rule and extract correlation patterns. Look for:
+
+1. AGGREGATION PATTERNS:
+   - "at least X events" → threshold counting
+   - "same [field]" → group by field
+   - "different [field]" → distinct counting (dcount)
+   - "unique [field]" → distinct counting (dcount)
+
+2. TIME PATTERNS:
+   - "in X minutes/hours/seconds" → time window
+   - "within X time" → time window
+   - "last X minutes" → time range
+
+3. FIELD RELATIONSHIPS:
+   - "same Source IP and different Destination IP" → group by SrcIP, count distinct DstIP
+   - "same user, different systems" → group by user, count distinct systems
+   - "multiple destinations" → dcount destinations
+
+4. FILTERING PATTERNS:
+   - "destination port X" → port filtering
+   - "NOT when source network" → exclusion filters
+   - "context is Local to Remote" → direction filters
+
+Return ONLY a JSON object with this exact structure:
+{{
+    "has_correlation": true/false,
+    "correlation_type": "threshold_based|time_based|multi_field|simple",
+    "aggregation": {{
+        "group_by_fields": ["field_name"],
+        "count_distinct_fields": ["field_name"],
+        "threshold_count": number,
+        "threshold_operator": ">=|>|<=|<|=="
+    }},
+    "time_window": {{
+        "value": number,
+        "unit": "m|h|s|d",
+        "kusto_format": "2m|1h|30s"
+    }},
+    "filters": [
+        {{
+            "field": "field_name",
+            "operator": "==|!=|contains|startswith",
+            "value": "filter_value",
+            "type": "include|exclude"
+        }}
+    ],
+    "table_hints": ["suggested_table_names"],
+    "complexity_score": 1-10,
+    "conversion_approach": "specialized_correlation|simple_filter|generic_template"
+}}"""
+
+            response = await llm_service.generate_response(prompt, max_tokens=800, use_cybersec_optimization=True)
+            
+            # Parse JSON response
+            import json
+            try:
+                # Clean up response
+                cleaned_response = response.strip()
+                if cleaned_response.startswith('```json'):
+                    cleaned_response = cleaned_response.split('```json')[1].split('```')[0]
+                elif cleaned_response.startswith('```'):
+                    cleaned_response = cleaned_response.split('```')[1].split('```')[0]
+                
+                correlation_data = json.loads(cleaned_response)
+                logger.info(f"Detected correlation pattern: {correlation_data.get('correlation_type', 'unknown')}")
+                return correlation_data
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse AI correlation response as JSON: {e}")
+                # Return basic correlation detection
+                return self._fallback_correlation_detection(rule_text)
+                
+        except Exception as e:
+            logger.error(f"AI correlation detection failed: {e}")
+            return self._fallback_correlation_detection(rule_text)
+    
+    def _fallback_correlation_detection(self, rule_text: str) -> Dict[str, Any]:
+        """Fallback correlation detection using pattern matching."""
+        correlation = {
+            "has_correlation": False,
+            "correlation_type": "simple",
+            "aggregation": {},
+            "time_window": {},
+            "filters": [],
+            "table_hints": [],
+            "complexity_score": 1,
+            "conversion_approach": "generic_template"
+        }
+        
+        # Basic threshold detection
+        threshold_match = re.search(r'at least\s+(\d+)\s+.+?\s+in\s+(\d+)\s+(\w+)', rule_text, re.IGNORECASE)
+        if threshold_match:
+            correlation["has_correlation"] = True
+            correlation["correlation_type"] = "threshold_based"
+            correlation["aggregation"]["threshold_count"] = int(threshold_match.group(1))
+            correlation["aggregation"]["threshold_operator"] = ">="
+            correlation["time_window"]["value"] = int(threshold_match.group(2))
+            correlation["time_window"]["unit"] = threshold_match.group(3)[0].lower()  # m, h, s
+            correlation["time_window"]["kusto_format"] = f"{threshold_match.group(2)}{threshold_match.group(3)[0].lower()}"
+            correlation["complexity_score"] = 6
+            correlation["conversion_approach"] = "specialized_correlation"
+        
+        return correlation
+
     def parse_rule(self, rule_text: str) -> Dict[str, Any]:
         """Parse QRadar rule text into structured format.
         
@@ -87,7 +250,8 @@ class QRadarRuleParser:
                 'conditions': conditions,
                 'actions': actions,
                 'responses': responses,
-                'metadata': self._extract_metadata_from_sections(sections, responses)
+                'metadata': self._extract_metadata_from_sections(sections, responses),
+                'ai_enhanced': False  # Mark as basic parsing
             }
             
             logger.debug(f"Successfully parsed QRadar rule: {parsed_rule['rule_name']}")

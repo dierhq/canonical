@@ -27,7 +27,7 @@ COPY . .
 RUN pip install -e .
 
 # Create data directories
-RUN mkdir -p data/cache data/chromadb data/repos
+RUN mkdir -p data/persistent/{chromadb,converters,outputs,custom_tables,cache} data/{repos,temp}
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash canonical

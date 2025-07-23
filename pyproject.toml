@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "canonical"
 dynamic = ["version"]
-description = "Intelligent SIEM rule converter with LangGraph, BGE embeddings, and ChromaDB"
+description = "Intelligent SIEM rule converter with Foundation-Sec-8B, BGE embeddings, and ChromaDB"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-keywords = ["siem", "sigma", "security", "rule-conversion", "langgraph", "chromadb"]
+keywords = ["siem", "sigma", "security", "rule-conversion", "foundation-sec-8b", "chromadb"]
 
 dependencies = [
     "fastapi>=0.104.0",
@@ -46,8 +46,6 @@ dependencies = [
     "loguru>=0.7.2",
     "python-dotenv>=1.0.0",
     "click>=8.1.0",
-    "qwen-agent>=0.0.3",
-    "modelscope>=1.9.0",
     "rank-bm25>=0.2.2",
     "pymupdf>=1.23.0",
     "mistralai>=0.1.0",

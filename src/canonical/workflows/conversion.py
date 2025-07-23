@@ -197,9 +197,9 @@ class ConversionWorkflow:
         return state
     
     async def _find_similar_node(self, state: ConversionState) -> ConversionState:
-        """Find similar rules in the knowledge base."""
+        """Find similar rules in the knowledge base with intelligent fallback."""
         try:
-            logger.info("Finding similar rules")
+            logger.info("Finding similar rules with intelligent search")
             
             if state.get("error"):
                 return state
@@ -212,30 +212,83 @@ class ConversionWorkflow:
             rule_summary = ""
             similar_rules = []
             
+            # Create intelligent rule summary
             if request.source_format.value == "sigma":
-                # Create rule summary for similarity search
                 rule_obj = sigma_parser.parse_rule(request.source_rule)
                 rule_summary = sigma_parser.extract_rule_summary(rule_obj)
-                
-                # Search for similar Sigma rules
-                similar_rules = await chromadb_service.find_similar_sigma_rules(
-                    query=rule_summary,
-                    n_results=5
-                )
+                primary_collection = "sigma_rules"
+                fallback_collections = ["azure_sentinel_detections"]
             elif request.source_format.value == "qradar":
-                # Create rule summary for QRadar rule
-                from ..parsers.qradar import qradar_parser
+                from ..parsers.qradar_parser import qradar_parser
                 rule_obj = qradar_parser.parse_rule(request.source_rule)
-                rule_summary = qradar_parser.extract_rule_summary(rule_obj)
-                
-                # Search for similar QRadar rules
-                similar_rules = await chromadb_service.find_qradar_rules(
+                # Create rule summary from parsed rule components
+                rule_summary = f"QRadar rule {rule_obj.get('rule_name', 'unknown')} {rule_obj.get('description', '')}"
+                # QRadar collection is empty, so use collections with similar content
+                primary_collection = "azure_sentinel_detections"  # Has KustoQL examples
+                fallback_collections = ["sigma_rules"]  # Has detection rules
+            else:
+                # Default for other formats
+                rule_summary = f"security detection rule {request.source_format.value}"
+                primary_collection = "sigma_rules"
+                fallback_collections = ["azure_sentinel_detections"]
+            
+            # Intelligent search parameters based on rule complexity
+            search_params = await self._determine_search_parameters(state, rule_summary)
+            
+            # Enhanced search strategy: try multiple collections
+            try:
+                # Try primary collection first
+                similar_rules = await chromadb_service.search_similar(
+                    collection_name=primary_collection,
                     query=rule_summary,
-                    n_results=5
+                    n_results=search_params["initial_search_count"]
                 )
+                
+                # If primary collection has insufficient results, try fallback collections
+                if len(similar_rules) < search_params["minimum_results_threshold"]:
+                    for fallback_collection in fallback_collections:
+                        try:
+                            fallback_rules = await chromadb_service.search_similar(
+                                collection_name=fallback_collection,
+                                query=rule_summary,
+                                n_results=search_params["fallback_search_count"]
+                            )
+                            similar_rules.extend(fallback_rules)
+                        except Exception as e:
+                            logger.warning(f"Fallback collection {fallback_collection} failed: {e}")
+                
+                # Remove duplicates and keep top results
+                seen_docs = set()
+                unique_rules = []
+                for rule in similar_rules:
+                    doc_id = rule.get('document', '')[:search_params["doc_id_length"]]  # Dynamic doc ID length
+                    if doc_id not in seen_docs:
+                        seen_docs.add(doc_id)
+                        unique_rules.append(rule)
+                        if len(unique_rules) >= search_params["max_context_items"]:  # Dynamic limit
+                            break
+                
+                similar_rules = unique_rules
+                logger.info(f"Found {len(similar_rules)} similar rules from ChromaDB")
+                
+            except Exception as e:
+                logger.warning(f"ChromaDB search failed: {e}")
+                similar_rules = []
+            
+            # INTELLIGENT FALLBACK: Use Foundation-Sec-8B's knowledge when ChromaDB is insufficient
+            if len(similar_rules) < search_params["minimum_results_threshold"]:
+                logger.info("ChromaDB returned insufficient results, using Foundation-Sec-8B knowledge")
+                try:
+                    sec8b_context = await self._get_foundation_sec8b_context(state, rule_summary)
+                    if sec8b_context:
+                        # Add Foundation-Sec-8B knowledge as synthetic "similar rules"
+                        similar_rules.extend(sec8b_context)
+                        logger.info(f"Added {len(sec8b_context)} items from Foundation-Sec-8B knowledge")
+                except Exception as e:
+                    logger.warning(f"Foundation-Sec-8B fallback failed: {e}")
             
             state["similar_rules"] = similar_rules
-            logger.info(f"Found {len(similar_rules)} similar rules")
+            logger.info(f"Total context items: {len(similar_rules)}")
             
         except Exception as e:
             logger.error(f"Failed to find similar rules: {e}")
@@ -243,6 +296,140 @@ class ConversionWorkflow:
             state["similar_rules"] = []
         
         return state
+    
+    async def _determine_search_parameters(self, state: ConversionState, rule_summary: str) -> Dict[str, int]:
+        """Dynamically determine search parameters using Foundation-Sec-8B's intelligence."""
+        try:
+            request = state["request"]
+            
+            # Ask Foundation-Sec-8B to determine optimal search parameters
+            params_prompt = f"""As a cybersecurity expert, determine optimal search parameters for finding similar rules and context:
+
+RULE TYPE: {request.source_format.value} to {request.target_format.value}
+RULE SUMMARY: {rule_summary}
+
+Based on your expertise, determine:
+1. How many similar rules to search for initially (3-15 range)
+2. Minimum results threshold before fallback (1-5 range)  
+3. How many additional rules to search in fallback collections (2-10 range)
+4. Maximum context items to keep (5-20 range)
+5. Document ID comparison length for deduplication (50-200 range)
+
+Consider:
+- Rule complexity (simple rules need fewer examples)
+- Conversion difficulty (complex conversions need more context)
+- Target format requirements (some formats need more examples)
+
+Respond with only numbers separated by commas:
+initial_search,min_threshold,fallback_search,max_context,doc_id_length"""
+
+            response = await llm_service.generate_response(params_prompt, max_tokens=100, use_cybersec_optimization=True)
+            
+            # Parse the response
+            try:
+                numbers = [int(x.strip()) for x in response.strip().split(',')]
+                if len(numbers) >= 5:
+                    return {
+                        "initial_search_count": max(3, min(15, numbers[0])),
+                        "minimum_results_threshold": max(1, min(5, numbers[1])),
+                        "fallback_search_count": max(2, min(10, numbers[2])),
+                        "max_context_items": max(5, min(20, numbers[3])),
+                        "doc_id_length": max(50, min(200, numbers[4]))
+                    }
+            except (ValueError, IndexError):
+                logger.warning("Failed to parse search parameters from Foundation-Sec-8B, using intelligent defaults")
+            
+            # Intelligent fallback based on complexity analysis
+            complexity_keywords = ["complex", "advanced", "correlation", "behavioral", "anomaly"]
+            is_complex = any(keyword in rule_summary.lower() for keyword in complexity_keywords)
+            
+            if is_complex:
+                return {
+                    "initial_search_count": 10,
+                    "minimum_results_threshold": 4, 
+                    "fallback_search_count": 8,
+                    "max_context_items": 15,
+                    "doc_id_length": 150
+                }
+            else:
+                return {
+                    "initial_search_count": 6,
+                    "minimum_results_threshold": 2,
+                    "fallback_search_count": 5,
+                    "max_context_items": 10,
+                    "doc_id_length": 100
+                }
+                
+        except Exception as e:
+            logger.warning(f"Failed to determine search parameters: {e}")
+            # Safe defaults
+            return {
+                "initial_search_count": 7,
+                "minimum_results_threshold": 3,
+                "fallback_search_count": 6,
+                "max_context_items": 12,
+                "doc_id_length": 120
+            }
+    
+    async def _get_foundation_sec8b_context(self, state: ConversionState, rule_summary: str) -> List[Dict[str, Any]]:
+        """Get context from Foundation-Sec-8B's cybersecurity knowledge when ChromaDB is insufficient."""
+        try:
+            request = state["request"]
+            
+            # Create a prompt to get Foundation-Sec-8B's knowledge about similar rules and patterns
+            knowledge_prompt = f"""As a cybersecurity expert with deep knowledge of SIEM rules and threat detection, provide context for converting this security rule:
+
+SOURCE FORMAT: {request.source_format.value}
+TARGET FORMAT: {request.target_format.value}
+RULE SUMMARY: {rule_summary}
+
+Based on your cybersecurity expertise, provide similar detection patterns, field mappings, and conversion guidance.
+
+Focus on:
+1. Similar detection rules and their patterns
+2. Field mappings between {request.source_format.value} and {request.target_format.value}
+3. Common tables and fields for this type of detection
+4. MITRE ATT&CK techniques related to this detection
+5. Best practices for this conversion
+
+Provide relevant examples with explanations:"""
+
+            # Get dynamic parameters for knowledge generation
+            search_params = await self._determine_search_parameters(state, rule_summary)
+            max_knowledge_items = min(search_params["max_context_items"], 8)  # Cap knowledge items
+            
+            # Get Foundation-Sec-8B's knowledge
+            response = await llm_service.generate_response(knowledge_prompt, max_tokens=1500, use_cybersec_optimization=True)
+            
+            # Parse response into structured context items
+            context_items = []
+            
+            # Split response into sections and create context items
+            sections = response.split('\n\n')
+            for i, section in enumerate(sections[:max_knowledge_items]):  # Dynamic max sections
+                min_section_length = max(30, search_params["doc_id_length"] // 4)  # Dynamic minimum length
+                if len(section.strip()) > min_section_length:  # Only meaningful sections
+                    # Dynamic similarity scoring
+                    base_similarity = 0.95 - (0.05 * (max_knowledge_items - 1))  # Adaptive base
+                    similarity_decrement = 0.05 if max_knowledge_items > 4 else 0.03
+                    
+                    context_items.append({
+                        'document': section.strip(),
+                        'metadata': {
+                            'source': 'foundation_sec8b_knowledge',
+                            'type': 'cybersecurity_expertise',
+                            'rule_type': request.source_format.value,
+                            'target_format': request.target_format.value
+                        },
+                        'similarity': base_similarity - (i * similarity_decrement),  # Dynamic similarity scores
+                        'distance': (1 - base_similarity) + (i * similarity_decrement)
+                    })
+            
+            return context_items
+            
+        except Exception as e:
+            logger.error(f"Failed to get Foundation-Sec-8B context: {e}")
+            return []
     
     async def _gather_context_node(self, state: ConversionState) -> ConversionState:
         """Gather additional context from knowledge base using enhanced retrieval."""
@@ -396,10 +583,11 @@ class ConversionWorkflow:
                 conversion_result["success"] = False
                 conversion_result["error_message"] = "No target rule generated"
             
-            # 2. Confidence score validation
+            # 2. Dynamic confidence score validation using Foundation-Sec-8B
             confidence = conversion_result.get("confidence_score", 0.0)
-            if confidence < 0.3:
-                validation_results.append(f"Low confidence score: {confidence}")
+            dynamic_threshold = await self._determine_confidence_threshold(state, conversion_result)
+            if confidence < dynamic_threshold:
+                validation_results.append(f"Low confidence score: {confidence} (threshold: {dynamic_threshold})")
             
             # 3. KustoQL-specific validation
             if (request.target_format.value == "kustoql" and 
@@ -468,6 +656,58 @@ class ConversionWorkflow:
             state["error"] = f"Result validation failed: {str(e)}"
         
         return state
+    
+    async def _determine_confidence_threshold(self, state: ConversionState, conversion_result: Dict[str, Any]) -> float:
+        """Dynamically determine confidence threshold using Foundation-Sec-8B's cybersecurity expertise."""
+        try:
+            request = state["request"]
+            
+            # Ask Foundation-Sec-8B to determine appropriate confidence threshold
+            threshold_prompt = f"""As a cybersecurity expert, determine the minimum confidence threshold for this SIEM rule conversion:
+
+SOURCE: {request.source_format.value}
+TARGET: {request.target_format.value}
+CONVERSION_METHOD: {conversion_result.get('conversion_method', 'unknown')}
+GENERATED_RULE_LENGTH: {len(conversion_result.get('target_rule', ''))}
+
+Consider:
+- Rule criticality and security impact
+- Conversion complexity and reliability
+- Target platform requirements
+- Acceptable risk level for automated deployment
+
+What minimum confidence score (0.0-1.0) would you require before accepting this conversion?
+Consider that this is for automated SIEM rule deployment.
+
+Respond with only a decimal number between 0.1 and 0.9:"""
+
+            response = await llm_service.generate_response(threshold_prompt, max_tokens=50, use_cybersec_optimization=True)
+            
+            # Parse the threshold
+            try:
+                threshold = float(response.strip())
+                # Ensure it's within reasonable bounds
+                return max(0.1, min(0.9, threshold))
+            except ValueError:
+                logger.warning("Failed to parse confidence threshold from Foundation-Sec-8B")
+            
+            # Intelligent fallback based on conversion characteristics
+            conversion_method = conversion_result.get('conversion_method', 'unknown')
+            rule_length = len(conversion_result.get('target_rule', ''))
+            
+            # Lower threshold for specialized converters (more reliable)
+            if conversion_method == 'specialized_converter':
+                return 0.2
+            # Higher threshold for LLM conversions
+            elif conversion_method in ['enhanced_llm', 'intelligent_llm']:
+                return 0.4 if rule_length > 100 else 0.5
+            # Medium threshold for hybrid approaches
+            else:
+                return 0.35
+                
+        except Exception as e:
+            logger.warning(f"Failed to determine confidence threshold: {e}")
+            return 0.3  # Conservative fallback
     
     async def _create_response_node(self, state: ConversionState) -> ConversionState:
         """Create the final response."""

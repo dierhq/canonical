@@ -2,17 +2,17 @@
 
 This guide provides detailed instructions for deploying Canonical in various environments, from development to enterprise production.
 
-## 🆕 Foundation-Sec-8B Upgrade
+## 🆕 Foundation-Sec-8B Integration
 
-**IMPORTANT**: Canonical now uses Foundation-Sec-8B by Cisco as the primary LLM for enhanced cybersecurity performance. This model provides:
+**IMPORTANT**: Canonical now uses Foundation-Sec-8B by Cisco as the cybersecurity-specialized LLM for enhanced security performance. This model provides:
 
 - **5-13% better performance** on cybersecurity benchmarks
 - **Deep domain knowledge** of CVEs, CWEs, MITRE ATT&CK
 - **Superior rule conversion accuracy** for SIEM platforms
-- **Intelligent fallback** to Qwen 2.5-3B if needed
+- **Specialized cybersecurity training** on 5.1B tokens of security data
 
 ### System Requirements for Foundation-Sec-8B
-- **Memory**: 32GB+ RAM (vs 16GB for Qwen)
+- **Memory**: 32GB+ RAM recommended for optimal performance
 - **GPU**: 16GB+ VRAM recommended (RTX A6000, V100, A100)
 - **Storage**: Additional 10GB for model weights
 - **Quantization**: Automatic 4-bit quantization on systems with <24GB VRAM
@@ -57,7 +57,7 @@ curl http://localhost:8000/health
 ### Prerequisites
 - **OS**: Ubuntu 20.04+ / CentOS 8+ / RHEL 8+
 - **Python**: 3.9+
-- **Memory**: 32+ GB RAM (upgraded for Foundation-Sec-8B)
+- **Memory**: 32+ GB RAM (for Foundation-Sec-8B)
 - **GPU Memory**: 16+ GB VRAM recommended (RTX A6000, V100, A100)
 - **Storage**: 60+ GB SSD (additional space for Foundation-Sec-8B model)
 - **Network**: Firewall configured for API access
@@ -112,7 +112,7 @@ pip install -r requirements.txt
 pip install -e .
 
 # Create directories
-mkdir -p data/cache data/chromadb data/repos logs
+mkdir -p data/persistent/{chromadb,converters,outputs,custom_tables,cache} data/{repos,temp} logs
 ```
 
 ### 3. Configuration
@@ -131,21 +131,15 @@ API_PORT=8000
 DEBUG=false
 LOG_LEVEL=INFO
 
-# Model settings (upgraded to Foundation-Sec-8B)
+# Model settings (Foundation-Sec-8B)
 EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
 LLM_MODEL=fdtn-ai/Foundation-Sec-8B
 EMBEDDING_DEVICE=cpu
 LLM_DEVICE=auto
-USE_FOUNDATION_SEC=true
-ENABLE_MODEL_FALLBACK=true
-
-# Legacy Qwen settings (fallback)
-QWEN_MODEL=Qwen/Qwen2.5-3B-Instruct
-QWEN_DEVICE=cpu
 
 # Database settings
-CHROMADB_PATH=/home/canonical/canonical/data/chromadb
-CACHE_DIR=/home/canonical/canonical/data/cache
+CHROMADB_PATH=/home/canonical/canonical/data/persistent/chromadb
+CACHE_DIR=/home/canonical/canonical/data/persistent/cache
 REPOS_DIR=/home/canonical/canonical/data/repos
 
 # Logging
@@ -163,23 +157,18 @@ sudo nano /etc/systemd/system/canonical.service
 [Unit]
 Description=Canonical SIEM Rule Converter
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+Restart=always
+RestartSec=1
 User=canonical
-Group=canonical
 WorkingDirectory=/home/canonical/canonical
 Environment=PATH=/home/canonical/canonical/venv/bin
 ExecStart=/home/canonical/canonical/venv/bin/python -m src.canonical.cli serve --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=10
-
-# Security settings
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/home/canonical/canonical/data /home/canonical/canonical/logs
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -187,17 +176,13 @@ WantedBy=multi-user.target
 
 ```bash
 # Enable and start service
-sudo systemctl daemon-reload
 sudo systemctl enable canonical
 sudo systemctl start canonical
-
-# Check status
 sudo systemctl status canonical
 ```
 
-### 4. Reverse Proxy Setup
+### 4. Nginx Configuration
 
-#### Nginx Configuration
 ```bash
 # Create nginx configuration
 sudo nano /etc/nginx/sites-available/canonical
@@ -207,33 +192,7 @@ sudo nano /etc/nginx/sites-available/canonical
 server {
     listen 80;
     server_name your-domain.com;
-    
-    # Redirect HTTP to HTTPS
-    return 301 https://$server_name$request_uri;
-}
 
-server {
-    listen 443 ssl http2;
-    server_name your-domain.com;
-    
-    # SSL configuration
-    ssl_certificate /etc/ssl/certs/canonical.crt;
-    ssl_certificate_key /etc/ssl/private/canonical.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
-    
-    # Security headers
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
-    
-    # Rate limiting
-    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
-    limit_req zone=api burst=20 nodelay;
-    
-    # Proxy to application
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
@@ -241,115 +200,70 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         
-        # Timeouts
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        
-        # Buffer settings
-        proxy_buffering on;
-        proxy_buffer_size 4k;
-        proxy_buffers 8 4k;
-    }
-    
-    # Health check endpoint
-    location /health {
-        proxy_pass http://127.0.0.1:8000/health;
-        access_log off;
+        # Timeouts for LLM processing
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+        proxy_send_timeout 300s;
     }
 }
 ```
 
 ```bash
-# Enable site
+# Enable site and restart nginx
 sudo ln -s /etc/nginx/sites-available/canonical /etc/nginx/sites-enabled/
 sudo nginx -t
-sudo systemctl reload nginx
+sudo systemctl restart nginx
 ```
 
-### 5. Data Initialization
+### 5. SSL/TLS Configuration (Recommended)
 
 ```bash
-# Initialize data (this may take 10-15 minutes)
-sudo su - canonical
-cd canonical
-source venv/bin/activate
-python -m src.canonical.cli data ingest-all --force-refresh
+# Install certbot
+sudo apt install certbot python3-certbot-nginx
 
-# Verify data ingestion
-python -m src.canonical.cli stats
+# Obtain SSL certificate
+sudo certbot --nginx -d your-domain.com
+
+# Verify auto-renewal
+sudo certbot renew --dry-run
 ```
 
-### 6. Monitoring Setup
+## 🐳 Docker Deployment
 
-#### Log Rotation
-```bash
-# Create logrotate configuration
-sudo nano /etc/logrotate.d/canonical
-```
-
-```
-/home/canonical/canonical/logs/*.log {
-    daily
-    rotate 30
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0644 canonical canonical
-    postrotate
-        systemctl reload canonical
-    endscript
-}
-```
-
-#### Health Monitoring
-```bash
-# Create health check script
-nano /home/canonical/health_check.sh
-```
+### Single Container
 
 ```bash
-#!/bin/bash
-HEALTH_URL="http://localhost:8000/health"
-RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_URL)
+# Build image
+docker build -t canonical .
 
-if [ $RESPONSE -eq 200 ]; then
-    echo "$(date): Canonical is healthy"
-else
-    echo "$(date): Canonical is unhealthy (HTTP $RESPONSE)"
-    systemctl restart canonical
-fi
+# Run container
+docker run -d \
+  --name canonical \
+  -p 8000:8000 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/logs:/app/logs \
+  canonical
 ```
 
-```bash
-# Make executable and add to cron
-chmod +x /home/canonical/health_check.sh
-crontab -e
-# Add: */5 * * * * /home/canonical/health_check.sh >> /home/canonical/health_check.log 2>&1
-```
+### Docker Compose
 
-## 🐳 Docker Production Deployment
-
-### Docker Compose Production Setup
 ```yaml
-# docker-compose.prod.yml
+# docker-compose.yml
 version: '3.8'
 
 services:
   canonical:
-    image: canonical:latest
     build: .
     ports:
-      - "127.0.0.1:8000:8000"
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - DEBUG=false
       - LOG_LEVEL=INFO
-    volumes:
-      - canonical_data:/app/data
-      - canonical_logs:/app/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -357,14 +271,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    deploy:
-      resources:
-        limits:
-          memory: 8G
-          cpus: '4'
-        reservations:
-          memory: 4G
-          cpus: '2'
 
   nginx:
     image: nginx:alpine
@@ -372,22 +278,16 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
     depends_on:
       - canonical
     restart: unless-stopped
-
-volumes:
-  canonical_data:
-    driver: local
-  canonical_logs:
-    driver: local
 ```
 
-### Kubernetes Deployment
+## ☸️ Kubernetes Deployment
 
-#### Namespace
+### Namespace
 ```yaml
 # namespace.yaml
 apiVersion: v1
@@ -475,7 +375,7 @@ spec:
 | `DEBUG` | Debug mode | `false` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `EMBEDDING_MODEL` | Embedding model | `BAAI/bge-large-en-v1.5` |
-| `QWEN_MODEL` | Language model | `Qwen/Qwen2.5-3B-Instruct` |
+| `LLM_MODEL` | Language model | `fdtn-ai/Foundation-Sec-8B` |
 | `CHROMADB_PATH` | ChromaDB path | `./data/chromadb` |
 
 ### Security Configuration
@@ -552,7 +452,7 @@ ps aux | grep canonical
 
 # Adjust model settings in .env
 EMBEDDING_DEVICE=cpu
-QWEN_DEVICE=cpu
+LLM_DEVICE=cpu
 ```
 
 #### API Timeouts

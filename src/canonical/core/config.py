@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # ChromaDB settings
     chromadb_host: str = Field(default="localhost", env="CHROMADB_HOST")
     chromadb_port: int = Field(default=8000, env="CHROMADB_PORT")
-    chromadb_path: str = Field(default="./canonical/data-volume/chromadb", env="CHROMADB_PATH")
+    chromadb_path: str = Field(default="./data/persistent/chromadb", env="CHROMADB_PATH")
     
     # Collection names
     sigma_collection: str = Field(default="sigma_rules", env="SIGMA_COLLECTION")
@@ -52,21 +52,11 @@ class Settings(BaseSettings):
     embedding_device: str = Field(default="cpu", env="EMBEDDING_DEVICE")
     embedding_batch_size: int = Field(default=32, env="EMBEDDING_BATCH_SIZE")
     
-    # Foundation-Sec-8B LLM settings (upgraded from Qwen)
+    # Foundation-Sec-8B LLM settings
     llm_model: str = Field(default="fdtn-ai/Foundation-Sec-8B", env="LLM_MODEL")
     llm_device: str = Field(default="auto", env="LLM_DEVICE")
     llm_max_tokens: int = Field(default=4096, env="LLM_MAX_TOKENS")
     llm_temperature: float = Field(default=0.1, env="LLM_TEMPERATURE")
-    
-    # Legacy Qwen settings (for fallback compatibility)
-    qwen_model: str = Field(default="Qwen/Qwen2.5-3B-Instruct", env="QWEN_MODEL")
-    qwen_device: str = Field(default="cpu", env="QWEN_DEVICE") 
-    qwen_max_tokens: int = Field(default=4096, env="QWEN_MAX_TOKENS")
-    qwen_temperature: float = Field(default=0.1, env="QWEN_TEMPERATURE")
-    
-    # Model selection strategy
-    use_foundation_sec: bool = Field(default=True, env="USE_FOUNDATION_SEC")
-    enable_model_fallback: bool = Field(default=True, env="ENABLE_MODEL_FALLBACK")
     
     # Data sources
     sigma_repo_url: str = Field(
@@ -93,7 +83,7 @@ class Settings(BaseSettings):
     # Data directories
     data_dir: Path = Field(default=Path("./data"), env="DATA_DIR")
     repos_dir: Path = Field(default=Path("./data/repos"), env="REPOS_DIR")
-    cache_dir: Path = Field(default=Path("./data/cache"), env="CACHE_DIR")
+    cache_dir: Path = Field(default=Path("./data/persistent/cache"), env="CACHE_DIR")
     
     # Logging settings
     log_level: str = Field(default="INFO", env="LOG_LEVEL")

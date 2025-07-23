@@ -36,9 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Sigma → Splunk SPL (Splunk Enterprise Security)
   - Sigma → QRadar AQL (IBM QRadar)
 
-- **AI-Powered Intelligence**
+- **Foundation-Sec-8B Intelligence**
   - Context-aware conversions using BGE-large-en-v1.5 embeddings
-  - Qwen2.5-3B-Instruct language model for rule generation
+  - Foundation-Sec-8B language model for cybersecurity-optimized rule generation
   - Confidence scoring for conversion quality assessment
   - Vector similarity search across knowledge base
 
@@ -79,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Technical Implementation
 - **Vector Database**: ChromaDB for semantic search and storage
 - **Embeddings**: BGE-large-en-v1.5 for text vectorization
-- **Language Model**: Qwen2.5-3B-Instruct for rule generation
+- **Language Model**: Foundation-Sec-8B for cybersecurity-specialized rule generation
 - **Web Framework**: FastAPI for API development
 - **CLI Framework**: Click for command-line interface
 - **Configuration**: Pydantic for settings management
@@ -112,48 +112,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration tests for API endpoints
 - End-to-end conversion testing
 - Performance benchmarking
-- Quality assurance procedures
-
-## [0.0.1] - 2025-01-XX
-
-### Added
-- Initial project structure
-- Basic rule parsing capabilities
-- Proof of concept implementations
-- Development environment setup
-- Core architecture design
-
----
-
-## Release Notes
-
-### Version 0.1.0 - Initial Release
-
-This is the first public release of Canonical SIEM Rule Converter, designed specifically for Security Operations Centers (SOCs), Managed Detection and Response (MDR) providers, and corporate cybersecurity teams.
-
-**Key Highlights:**
-- **5 Target Formats**: Convert Sigma rules to major SIEM query languages
-- **6,891 Documents**: Comprehensive knowledge base for context-aware conversions
-- **95%+ Accuracy**: High-quality conversions with confidence scoring
-- **Enterprise Ready**: Scalable architecture with API and CLI interfaces
-
-**Target Users:**
-- SOC analysts and security engineers
-- MDR service providers
-- Corporate cybersecurity teams
-- Security researchers and educators
-- SIEM platform administrators
-
-**Getting Started:**
-1. Install dependencies: `pip3 install -r requirements.txt`
-2. Configure environment: `cp env.example .env`
-3. Initialize data: `python3 -m src.canonical.cli data ingest-all`
-4. Start converting: `python3 -m src.canonical.cli convert rule.yml kustoql`
-
-For detailed installation and usage instructions, see the [README.md](README.md) and [System Requirements](SYSTEM_REQUIREMENTS.md).
-
----
-
-**License**: Custom License - Internal use only for SOCs, MDRs, and corporate security teams  
-**Organization**: DIER  
-**Contact**: team@dierhq.com 
+- Quality assurance workflows 

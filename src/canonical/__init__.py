@@ -12,7 +12,7 @@ For licensing inquiries, contact: licensing@dier.org
 Canonical - Intelligent SIEM Rule Converter
 
 An intelligent system for converting security rules between different SIEM formats,
-leveraging LangGraph, BGE embeddings, Qwen LLM, and ChromaDB for robust rule transformation.
+leveraging Foundation-Sec-8B, BGE embeddings, and ChromaDB for robust rule transformation.
 """
 
 __version__ = "0.1.0"
