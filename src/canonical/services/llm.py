@@ -259,6 +259,38 @@ class FoundationSecLLMService:
                 "error_message": str(e)
             }
     
+    async def convert_qradar_rule(
+        self, 
+        qradar_rule: str, 
+        target_format: TargetFormat,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Convert a QRadar rule to any target format using Foundation-Sec-8B.
+        
+        Args:
+            qradar_rule: QRadar rule content
+            target_format: Target format to convert to
+            context: Additional context for conversion
+            
+        Returns:
+            Conversion result with converted rule, confidence, and explanation
+        """
+        prompt = self._build_qradar_conversion_prompt(qradar_rule, target_format, context)
+        
+        try:
+            response = await self.generate_response(prompt, use_cybersec_optimization=True)
+            logger.debug(f"Foundation-Sec-8B QRadar conversion response: {response}")
+            return self._parse_conversion_response(response, target_format)
+        except Exception as e:
+            logger.error(f"Failed to convert QRadar rule: {e}")
+            return {
+                "success": False,
+                "target_rule": None,
+                "confidence_score": 0.0,
+                "explanation": f"QRadar conversion failed: {str(e)}",
+                "error_message": str(e)
+            }
+
     async def convert_qradar_to_kustoql(
         self, 
         qradar_rule: str, 
@@ -273,21 +305,7 @@ class FoundationSecLLMService:
         Returns:
             Conversion result with KustoQL rule, confidence, and explanation
         """
-        prompt = self._build_qradar_conversion_prompt(qradar_rule, context)
-        
-        try:
-            response = await self.generate_response(prompt, use_cybersec_optimization=True)
-            logger.debug(f"Foundation-Sec-8B QRadar conversion response: {response}")
-            return self._parse_qradar_conversion_response(response)
-        except Exception as e:
-            logger.error(f"Failed to convert QRadar rule: {e}")
-            return {
-                "success": False,
-                "target_rule": None,
-                "confidence_score": 0.0,
-                "explanation": f"QRadar conversion failed: {str(e)}",
-                "error_message": str(e)
-            }
+        return await self.convert_qradar_rule(qradar_rule, TargetFormat.KUSTOQL, context)
     
     def _build_conversion_prompt(self, sigma_rule: str, target_format: TargetFormat, context: Optional[Dict[str, Any]] = None) -> str:
         """Build a conversion prompt for Foundation-Sec-8B."""
@@ -313,26 +331,39 @@ Output the converted {format_name} rule:"""
 
         return prompt
     
-    def _build_qradar_conversion_prompt(self, qradar_rule: str, context: Optional[Dict[str, Any]] = None) -> str:
-        """Build a QRadar to KustoQL conversion prompt for Foundation-Sec-8B."""
+    def _build_qradar_conversion_prompt(self, qradar_rule: str, target_format: TargetFormat, context: Optional[Dict[str, Any]] = None) -> str:
+        """Build a QRadar conversion prompt for Foundation-Sec-8B."""
         context_str = ""
         if context and context.get("similar_rules"):
-            context_str = f"\nRelevant Azure Sentinel context:\n{context['similar_rules'][:500]}..."
+            context_str = f"\nRelevant context from similar rules:\n{context['similar_rules'][:500]}..."
         
-        prompt = f"""You are a cybersecurity expert specializing in QRadar to Azure Sentinel (KustoQL) rule conversion.
+        format_name = target_format.value.upper()
+        
+        # Format-specific guidance
+        format_guidance = {
+            "KUSTOQL": "Uses Azure Sentinel tables (SecurityEvent, CommonSecurityLog, etc.) with KustoQL syntax",
+            "SIGMA": "Uses Sigma detection rule format with proper field mappings",
+            "SPL": "Uses Splunk Processing Language with appropriate data models",
+            "EQL": "Uses Event Query Language with proper event correlation",
+            "AQL": "Uses IBM QRadar AQL (optimization/validation)"
+        }
+        
+        guidance = format_guidance.get(format_name, f"Uses {format_name} query language syntax")
+        
+        prompt = f"""You are a cybersecurity expert specializing in SIEM rule conversion. Convert this QRadar rule to {format_name} format.
 
 Input QRadar Rule:
 {qradar_rule}
 {context_str}
 
-Convert this QRadar rule to a production-ready KustoQL query for Azure Sentinel that:
+Convert this QRadar rule to a production-ready {format_name} query that:
 1. Preserves the original detection logic and thresholds
-2. Uses appropriate Azure Sentinel tables (SecurityEvent, CommonSecurityLog, etc.)
-3. Implements proper KustoQL syntax with correct operators
+2. {guidance}
+3. Implements proper syntax with correct operators
 4. Maintains the same security effectiveness and alert conditions
 5. Includes time windows, aggregations, and filtering as needed
 
-Generate the complete KustoQL query:"""
+Generate the complete {format_name} query:"""
 
         return prompt
     

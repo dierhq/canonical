@@ -469,38 +469,15 @@ Provide relevant examples with explanations:"""
             
             request = state["request"]
             
-            # Check if we should use specialized converters first
-            if (request.source_format.value == "qradar" and 
-                request.target_format.value == "kustoql"):
-                logger.info("Using specialized QRadar to KustoQL converter")
-                # Use specialized QRadar to KustoQL converter with enhanced rule
-                from ..workflows.qradar_to_kustoql import qradar_to_kustoql_converter
-                # Create a new request with the enhanced rule
-                enhanced_request = ConversionRequest(
-                    source_rule=state["enhanced_rule"],  # Use enhanced rule
-                    source_format=request.source_format,
-                    target_format=request.target_format
-                )
-                conversion_response = await qradar_to_kustoql_converter.convert_rule(enhanced_request)
-                conversion_result = {
-                    "success": conversion_response.success,
-                    "target_rule": conversion_response.target_rule,
-                    "confidence_score": conversion_response.confidence_score,
-                    "explanation": conversion_response.explanation,
-                    "mitre_techniques": conversion_response.mitre_techniques,
-                    "field_mappings": conversion_response.field_mappings,
-                    "conversion_notes": conversion_response.conversion_notes,
-                    "metadata": getattr(conversion_response, 'metadata', {})
-                }
-            else:
-                logger.info("Using enhanced LLM service for conversion")
-                # Use enhanced LLM service with retry logic
-                conversion_result = await enhanced_llm_service.convert_with_retry(
-                    source_rule=request.source_rule,
-                    source_format=request.source_format.value,
-                    target_format=request.target_format.value,
-                    max_retries=2
-                )
+            # Use enhanced LLM service for ALL conversions (ChromaDB + Foundation-Sec-8B)
+            logger.info("Using enhanced LLM service with ChromaDB + Foundation-Sec-8B")
+            # Use enhanced LLM service with retry logic and enhanced rule
+            conversion_result = await enhanced_llm_service.convert_with_retry(
+                source_rule=state["enhanced_rule"],  # Use enhanced rule
+                source_format=request.source_format.value,
+                target_format=request.target_format.value,
+                max_retries=2
+            )
             
             state["conversion_result"] = conversion_result
             logger.info("Rule conversion completed")
@@ -519,28 +496,17 @@ Provide relevant examples with explanations:"""
                     "context_data": state.get("context_data", {})
                 }
                 
-                # Use original LLM service or specialized converters
-                if (request.source_format.value == "qradar" and 
-                    request.target_format.value == "kustoql"):
-                    # Use specialized QRadar to KustoQL converter with enhanced rule
-                    from ..workflows.qradar_to_kustoql import qradar_to_kustoql_converter
-                    # Create a new request with the enhanced rule for fallback too
-                    enhanced_fallback_request = ConversionRequest(
-                        source_rule=state.get("enhanced_rule", request.source_rule),  # Use enhanced rule if available
-                        source_format=request.source_format,
-                        target_format=request.target_format
+                # Use Foundation-Sec-8B for ALL conversions - no specialized converters
+                if request.source_format.value == "qradar":
+                    # Use Foundation-Sec-8B for QRadar conversion with enhanced rule
+                    enhanced_rule = state.get("enhanced_rule", request.source_rule)
+                    conversion_result = await llm_service.convert_qradar_rule(
+                        qradar_rule=enhanced_rule,
+                        target_format=request.target_format,
+                        context=context
                     )
-                    conversion_response = await qradar_to_kustoql_converter.convert_rule(enhanced_fallback_request)
-                    conversion_result = {
-                        "success": conversion_response.success,
-                        "target_rule": conversion_response.target_rule,
-                        "confidence_score": conversion_response.confidence_score,
-                        "explanation": conversion_response.explanation,
-                        "mitre_techniques": conversion_response.mitre_techniques,
-                        "field_mappings": conversion_response.field_mappings,
-                        "conversion_notes": conversion_response.conversion_notes
-                    }
                 else:
+                    # Use Foundation-Sec-8B for other formats
                     conversion_result = await llm_service.convert_sigma_rule(
                         sigma_rule=request.source_rule,
                         target_format=request.target_format,
