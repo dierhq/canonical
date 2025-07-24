@@ -438,26 +438,451 @@ Provide relevant examples with explanations:"""
             
             if state.get("error"):
                 return state
-            
+
             request = state["request"]
+            parsed_rule = state.get("parsed_rule", {})
             
-            # Use enhanced hybrid retrieval for comprehensive context
-            enhanced_context = await hybrid_retrieval_service.retrieve_context_for_conversion(
-                rule_content=request.source_rule,
-                source_format=request.source_format.value,
-                target_format=request.target_format.value
+            # Extract pattern analysis from parsed rule for enhanced context
+            pattern_context = self._extract_pattern_context(parsed_rule, request.source_format)
+            
+            # Use enhanced hybrid retrieval with Azure Sentinel focus for KustoQL
+            enhanced_context = await self._enhanced_hybrid_retrieval(
+                request, state.get("similar_rules", []), pattern_context
             )
             
-            # Store enhanced context
+            # NEW: Add custom table context - auto-detect if not provided
+            organization = None
+            if hasattr(request, 'context') and request.context and request.context.get("organization"):
+                organization = request.context["organization"]
+            else:
+                # Auto-detect organization from available custom tables
+                from ..services.custom_tables import custom_table_service
+                organization = await custom_table_service.auto_detect_organization(request.source_rule)
+            
+            if organization:
+                logger.info(f"Using custom tables for organization: {organization}")
+                
+                try:
+                    # Create rule summary for custom table search
+                    rule_summary = ""
+                    if hasattr(parsed_rule, 'get') and parsed_rule.get('title'):
+                        rule_summary = f"{parsed_rule['title']} {parsed_rule.get('description', '')}"
+                    elif hasattr(request, 'source_rule'):
+                        # Extract key terms from source rule for search
+                        rule_summary = request.source_rule[:200]  # First 200 chars as summary
+                    
+                    # Import and use custom table service
+                    from ..services.custom_tables import custom_table_service
+                    custom_tables = await custom_table_service.search_custom_tables(
+                        query=rule_summary,
+                        organization=organization,
+                        n_results=3
+                    )
+                    
+                    if custom_tables:
+                        enhanced_context["custom_tables"] = custom_tables
+                        logger.info(f"Added {len(custom_tables)} custom table schemas to context")
+                        
+                        # Extract table names for validation hints
+                        table_names = []
+                        for table in custom_tables:
+                            table_name = table.get("metadata", {}).get("table_name")
+                            if table_name:
+                                table_names.append(table_name)
+                        
+                        if table_names:
+                            enhanced_context["available_tables"] = table_names
+                            logger.info(f"Available custom tables: {', '.join(table_names)}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve custom tables for {organization}: {e}")
+            else:
+                logger.debug("No custom tables available - using standard conversion")
+            
+            # Enhance context with pattern analysis
+            if pattern_context:
+                enhanced_context.update(pattern_context)
+                logger.info(f"Enhanced context with {len(pattern_context.get('regex_patterns', []))} regex patterns")
+
+            # Generate professional KustoQL template with Azure Sentinel examples
+            if request.source_format.value == "qradar" and request.target_format.value == "kustoql":
+                kusto_template = await self._generate_kusto_template_with_examples(parsed_rule, pattern_context)
+                enhanced_context['kusto_template'] = kusto_template
+                logger.info(f"Generated KustoQL template with {len(kusto_template.get('azure_examples', []))} Azure Sentinel examples")
+
+            # Extract field names from context for validation
+            field_names = set()
+            for item in enhanced_context.get("context_items", []):
+                if "metadata" in item and "field_names" in item["metadata"]:
+                    field_names.update(item["metadata"]["field_names"])
+                    
+            enhanced_context["field_names"] = list(field_names)
+
             state["context_data"] = enhanced_context
-            logger.info(f"Enhanced context gathered with {len(enhanced_context.get('field_names', []))} field names")
+            logger.info(f"Enhanced context gathered with {len(field_names)} field names")
+
+            return state
             
         except Exception as e:
-            logger.error(f"Failed to gather enhanced context: {e}")
-            # Fallback to original context gathering
-            state["context_data"] = {}
+            logger.error(f"Error gathering context: {e}")
+            state["error"] = f"Context gathering failed: {str(e)}"
+            return state
+    
+    def _extract_pattern_context(self, parsed_rule: Dict[str, Any], source_format) -> Dict[str, Any]:
+        """Extract pattern analysis context from parsed rule for better conversion."""
+        pattern_context = {
+            'regex_patterns': [],
+            'field_mappings': {},
+            'pattern_semantics': [],
+            'conversion_hints': []
+        }
         
-        return state
+        if source_format.value != "qradar":
+            return pattern_context
+        
+        # Extract custom field patterns from QRadar conditions
+        conditions = parsed_rule.get('conditions', [])
+        for condition in conditions:
+            if condition.get('type') == 'custom_field_match':
+                field_name = condition.get('field', '')
+                pattern = condition.get('pattern', '')
+                pattern_analysis = condition.get('pattern_analysis', {})
+                
+                if pattern and pattern_analysis:
+                    # Add regex pattern with analysis
+                    pattern_context['regex_patterns'].append({
+                        'pattern': pattern,
+                        'field': field_name,
+                        'analysis': pattern_analysis,
+                        'raw_match': condition.get('raw_match', '')
+                    })
+                    
+                    # Add field mapping hints
+                    suggested_kusto_field = self._suggest_kusto_field_mapping(field_name, pattern_analysis)
+                    if suggested_kusto_field:
+                        pattern_context['field_mappings'][field_name] = suggested_kusto_field
+                    
+                    # Add semantic meaning for prompt context
+                    if pattern_analysis.get('semantic_meaning'):
+                        pattern_context['pattern_semantics'].append({
+                            'field': field_name,
+                            'meaning': pattern_analysis['semantic_meaning'],
+                            'approach': pattern_analysis.get('suggested_kusto_approach', 'regex_match')
+                        })
+                    
+                    # Add conversion hints based on pattern type
+                    conversion_hint = self._generate_conversion_hint(field_name, pattern, pattern_analysis)
+                    if conversion_hint:
+                        pattern_context['conversion_hints'].append(conversion_hint)
+        
+        return pattern_context
+    
+    def _suggest_kusto_field_mapping(self, qradar_field: str, pattern_analysis: Dict[str, Any]) -> Optional[str]:
+        """Suggest KustoQL field mapping based on QRadar field and pattern analysis."""
+        field_lower = qradar_field.lower()
+        
+        # DNS-related field mappings
+        if 'dns' in field_lower and 'query' in field_lower:
+            return 'DnsEvents.QueryName'
+        elif 'dns' in field_lower and 'response' in field_lower:
+            return 'DnsEvents.ResponseName'
+        elif 'dns' in field_lower:
+            return 'DnsEvents.QueryName'
+        
+        # Network-related field mappings
+        elif 'source' in field_lower and 'ip' in field_lower:
+            return 'SourceIP'
+        elif 'destination' in field_lower and 'ip' in field_lower:
+            return 'DestinationIP'
+        elif 'url' in field_lower or pattern_analysis.get('pattern_type') == 'domain_url':
+            return 'Url'
+        
+        # Process-related field mappings
+        elif 'process' in field_lower and 'name' in field_lower:
+            return 'ProcessName'
+        elif 'command' in field_lower:
+            return 'CommandLine'
+        
+        # File-related field mappings
+        elif 'file' in field_lower and 'name' in field_lower:
+            return 'FileName'
+        elif 'file' in field_lower and 'path' in field_lower:
+            return 'FilePath'
+        
+        # Default based on pattern type
+        elif pattern_analysis.get('pattern_type') == 'base64_encoding':
+            # For Base64 patterns, suggest the most likely field based on context
+            if 'dns' in field_lower:
+                return 'DnsEvents.QueryName'
+            else:
+                return 'EventData'
+        
+        return None
+    
+    def _generate_conversion_hint(self, field_name: str, pattern: str, pattern_analysis: Dict[str, Any]) -> Optional[str]:
+        """Generate conversion hints for Foundation-Sec-8B based on pattern analysis."""
+        pattern_type = pattern_analysis.get('pattern_type', 'unknown')
+        suggested_approach = pattern_analysis.get('suggested_kusto_approach', 'regex_match')
+        semantic_meaning = pattern_analysis.get('semantic_meaning', '')
+        
+        if pattern_type == 'base64_encoding':
+            kusto_field = self._suggest_kusto_field_mapping(field_name, pattern_analysis)
+            length_constraints = pattern_analysis.get('length_constraints', {})
+            
+            hint = f"Convert QRadar field '{field_name}' to KustoQL field '{kusto_field or 'QueryName'}' "
+            hint += f"using regex pattern '{pattern}' for {semantic_meaning}. "
+            
+            if length_constraints:
+                min_len = length_constraints.get('min', 0)
+                hint += f"Pattern detects Base64 strings with minimum length {min_len}. "
+            
+            hint += f"Use KustoQL 'matches regex' operator for exact pattern matching."
+            return hint
+        
+        elif pattern_type in ['hexadecimal', 'ip_address']:
+            kusto_field = self._suggest_kusto_field_mapping(field_name, pattern_analysis)
+            hint = f"Convert QRadar field '{field_name}' to KustoQL field '{kusto_field or 'EventData'}' "
+            hint += f"using regex pattern '{pattern}' for {semantic_meaning}. "
+            hint += f"Use KustoQL 'matches regex' operator."
+            return hint
+        
+        elif pattern_type == 'domain_url':
+            kusto_field = self._suggest_kusto_field_mapping(field_name, pattern_analysis)
+            hint = f"Convert QRadar field '{field_name}' to KustoQL field '{kusto_field or 'Url'}' "
+            hint += f"for {semantic_meaning}. Consider using 'contains' or 'matches regex' based on pattern complexity."
+            return hint
+        
+        return None
+    
+    def _generate_kusto_template(self, parsed_rule: Dict[str, Any], pattern_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate professional KustoQL template based on rule analysis."""
+        template = {
+            'pattern_variables': [],
+            'table_selection': None,
+            'filters': [],
+            'field_mappings': {},
+            'output_fields': [],
+            'comments': []
+        }
+        
+        # Extract rule metadata for template generation
+        rule_name = parsed_rule.get('rule_name', 'Unknown Rule')
+        category = parsed_rule.get('category', '')
+        conditions = parsed_rule.get('conditions', [])
+        
+        # Generate pattern variables
+        for pattern_info in pattern_context.get('regex_patterns', []):
+            pattern = pattern_info.get('pattern', '')
+            field = pattern_info.get('field', '')
+            analysis = pattern_info.get('analysis', {})
+            pattern_type = analysis.get('pattern_type', 'unknown')
+            
+            if pattern_type == 'base64_encoding':
+                var_name = 'Base64Pattern'
+                template['pattern_variables'].append({
+                    'name': var_name,
+                    'value': f'@"{pattern}$"',  # Add end anchor for proper matching
+                    'comment': f'Base64 encoded data detection pattern'
+                })
+            elif pattern_type == 'hexadecimal':
+                var_name = 'HexPattern'
+                template['pattern_variables'].append({
+                    'name': var_name,
+                    'value': f'@"{pattern}"',
+                    'comment': f'Hexadecimal data pattern'
+                })
+            elif pattern_type == 'ip_address':
+                var_name = 'IpPattern'
+                template['pattern_variables'].append({
+                    'name': var_name,
+                    'value': f'@"{pattern}"',
+                    'comment': f'IP address pattern'
+                })
+        
+        # Determine table based on rule category and conditions
+        template['table_selection'] = self._select_kusto_table(category, conditions)
+        
+        # Generate filters based on conditions
+        template['filters'] = self._generate_kusto_filters(conditions, pattern_context)
+        
+        # Generate field mappings
+        template['field_mappings'] = self._generate_kusto_field_mappings(conditions, pattern_context)
+        
+        # Generate output fields
+        template['output_fields'] = self._generate_kusto_output_fields(template['table_selection'], conditions)
+        
+        # Generate comments
+        template['comments'] = [
+            f'Converted from QRadar rule: {rule_name}',
+            f'Original category: {category}' if category else None,
+            'Generated by Canonical SIEM Rule Converter'
+        ]
+        template['comments'] = [c for c in template['comments'] if c]  # Remove None values
+        
+        return template
+    
+    def _select_kusto_table(self, category: str, conditions: List[Dict[str, Any]]) -> str:
+        """Select appropriate KustoQL table based on rule category and conditions."""
+        category_lower = category.lower() if category else ''
+        
+        # DNS-related rules
+        if 'dns' in category_lower:
+            return 'DnsEvents'
+        
+        # Process-related rules
+        elif 'process' in category_lower or 'system.process' in category_lower:
+            return 'DeviceProcessEvents'
+        
+        # Network-related rules
+        elif 'network' in category_lower or 'connection' in category_lower:
+            return 'DeviceNetworkEvents'
+        
+        # File-related rules
+        elif 'file' in category_lower:
+            return 'DeviceFileEvents'
+        
+        # Authentication-related rules
+        elif 'logon' in category_lower or 'auth' in category_lower:
+            return 'SigninLogs'
+        
+        # Check conditions for more specific table selection
+        for condition in conditions:
+            if condition.get('type') == 'event_category':
+                categories = condition.get('values', [])
+                for cat in categories:
+                    cat_lower = cat.lower()
+                    if 'dns' in cat_lower:
+                        return 'DnsEvents'
+                    elif 'process' in cat_lower:
+                        return 'DeviceProcessEvents'
+                    elif 'network' in cat_lower:
+                        return 'DeviceNetworkEvents'
+        
+        # Default fallback
+        return 'SecurityEvent'
+    
+    def _generate_kusto_filters(self, conditions: List[Dict[str, Any]], pattern_context: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Generate KustoQL filters based on QRadar conditions."""
+        filters = []
+        
+        for condition in conditions:
+            condition_type = condition.get('type')
+            
+            if condition_type == 'event_category':
+                categories = condition.get('values', [])
+                # Map QRadar categories to KustoQL EventSubType
+                kusto_categories = self._map_qradar_categories_to_kusto(categories)
+                if kusto_categories:
+                    quoted_categories = [f'"{cat}"' for cat in kusto_categories]
+                    filters.append({
+                        'field': 'EventSubType',
+                        'operator': 'in',
+                        'value': f'({", ".join(quoted_categories)})',
+                        'comment': 'QRadar category mapping'
+                    })
+            
+            elif condition_type == 'custom_field_match':
+                field = condition.get('field', '')
+                pattern = condition.get('pattern', '')
+                analysis = condition.get('pattern_analysis', {})
+                
+                kusto_field = self._suggest_kusto_field_mapping(field, analysis)
+                if kusto_field:
+                    # Use pattern variable if available
+                    pattern_var = self._get_pattern_variable_name(analysis.get('pattern_type'))
+                    if pattern_var:
+                        filters.append({
+                            'field': kusto_field,
+                            'operator': 'matches regex',
+                            'value': pattern_var,
+                            'comment': f'Pattern matching for {field}'
+                        })
+        
+        # Add default success filter for DNS queries
+        if any('dns' in str(condition).lower() for condition in conditions):
+            filters.append({
+                'field': 'QueryStatus',
+                'operator': '==',
+                'value': '"Succeeded"',
+                'comment': 'Only successful DNS queries'
+            })
+        
+        return filters
+    
+    def _map_qradar_categories_to_kusto(self, qradar_categories: List[str]) -> List[str]:
+        """Map QRadar event categories to KustoQL EventSubType values."""
+        mapping = {
+            'Application.DNS In Progress': 'DNS In Progress',
+            'Application.DNS Opened': 'DNS Opened',
+            'System.Process Created': 'Process Created',
+            'Network.Connection Opened': 'Connection Opened',
+            'Network.Connection Closed': 'Connection Closed',
+            'File.Created': 'File Created',
+            'File.Modified': 'File Modified',
+            'Authentication.Login': 'Login',
+            'Authentication.Logout': 'Logout'
+        }
+        
+        kusto_categories = []
+        for category in qradar_categories:
+            mapped = mapping.get(category, category)  # Use original if no mapping
+            kusto_categories.append(mapped)
+        
+        return kusto_categories
+    
+    def _get_pattern_variable_name(self, pattern_type: str) -> Optional[str]:
+        """Get pattern variable name based on pattern type."""
+        mapping = {
+            'base64_encoding': 'Base64Pattern',
+            'hexadecimal': 'HexPattern',
+            'ip_address': 'IpPattern',
+            'domain_url': 'DomainPattern'
+        }
+        return mapping.get(pattern_type)
+    
+    def _generate_kusto_field_mappings(self, conditions: List[Dict[str, Any]], pattern_context: Dict[str, Any]) -> Dict[str, str]:
+        """Generate KustoQL field mappings with proper Azure Sentinel conventions."""
+        mappings = {}
+        
+        # Standard Azure Sentinel field conventions
+        standard_mappings = {
+            'SourceIp': 'SrcIpAddr = tostring(SourceIp)',
+            'DestinationIp': 'DstIpAddr = tostring(DestinationIp)',
+            'SourceIP': 'SrcIpAddr = tostring(SourceIP)',
+            'DestinationIP': 'DstIpAddr = tostring(DestinationIP)',
+            'ProcessName': 'ProcessName',
+            'CommandLine': 'CommandLine',
+            'FileName': 'FileName',
+            'QueryName': 'QueryName',
+            'UserName': 'UserName'
+        }
+        
+        # Apply standard mappings based on context
+        for pattern_info in pattern_context.get('regex_patterns', []):
+            field = pattern_info.get('field', '')
+            analysis = pattern_info.get('analysis', {})
+            kusto_field = self._suggest_kusto_field_mapping(field, analysis)
+            
+            if kusto_field and kusto_field in standard_mappings:
+                mappings[kusto_field] = standard_mappings[kusto_field]
+        
+        return mappings
+    
+    def _generate_kusto_output_fields(self, table: str, conditions: List[Dict[str, Any]]) -> List[str]:
+        """Generate appropriate output fields based on table and conditions."""
+        base_fields = ['TimeGenerated']
+        
+        if table == 'DnsEvents':
+            return base_fields + ['SrcIpAddr = tostring(SourceIp)', 'DstIpAddr = tostring(DestinationIp)', 
+                                  'QueryName', 'DnsResponseCode']
+        elif table == 'DeviceProcessEvents':
+            return base_fields + ['DeviceName', 'ProcessName', 'CommandLine', 'AccountName']
+        elif table == 'DeviceNetworkEvents':
+            return base_fields + ['DeviceName', 'RemoteIP', 'RemotePort', 'LocalIP', 'LocalPort']
+        elif table == 'SecurityEvent':
+            return base_fields + ['Computer', 'Account', 'EventID', 'Activity']
+        
+        return base_fields + ['*']  # Fallback
     
     async def _convert_rule_node(self, state: ConversionState) -> ConversionState:
         """Convert the rule using specialized converters or enhanced LLM."""
@@ -594,35 +1019,126 @@ Provide relevant examples with explanations:"""
                     validation_results.append(f"Only {mapped_fields}/{len(field_names)} fields mapped")
                     conversion_result["confidence_score"] = max(0.0, confidence - 0.1)
             
-            # 5. Table validation for KustoQL
+            # 5. Enhanced pattern preservation validation for QRadar rules
+            if (request.source_format.value == "qradar" and 
+                conversion_result.get("target_rule")):
+                
+                pattern_validation = self._validate_pattern_preservation(state, conversion_result)
+                validation_results.extend(pattern_validation["warnings"])
+                if pattern_validation["confidence_adjustment"]:
+                    current_confidence = conversion_result.get("confidence_score", confidence)
+                    conversion_result["confidence_score"] = max(0.0, current_confidence + pattern_validation["confidence_adjustment"])
+            
+            # 6. Table validation for KustoQL
             if (request.target_format.value == "kustoql" and 
                 conversion_result.get("target_rule")):
                 
-                recommended_table = state.get("context_data", {}).get("recommended_table")
-                if recommended_table:
-                    if recommended_table not in conversion_result["target_rule"]:
-                        validation_results.append(f"Recommended table '{recommended_table}' not used in query")
-                        conversion_result["confidence_score"] = max(0.0, confidence - 0.1)
-            
-            # 6. NO MAPPING validation
-            if "NO MAPPING" in str(conversion_result):
-                validation_results.append("Model indicated insufficient context for mapping")
-                conversion_result["success"] = False
-                conversion_result["error_message"] = "Insufficient context for reliable mapping"
+                table_validation = self._validate_kusto_table_usage(conversion_result["target_rule"])
+                validation_results.extend(table_validation)
             
             # Store validation results
             if validation_results:
-                conversion_result["validation_warnings"] = validation_results
                 logger.warning(f"Validation warnings: {validation_results}")
+                conversion_result["validation_warnings"] = validation_results
             
-            state["conversion_result"] = conversion_result
             logger.info(f"Enhanced validation completed with {len(validation_results)} warnings")
             
         except Exception as e:
-            logger.error(f"Failed to validate result: {e}")
-            state["error"] = f"Result validation failed: {str(e)}"
+            logger.error(f"Failed to validate conversion result: {e}")
+            state["error"] = f"Validation failed: {str(e)}"
         
         return state
+    
+    def _validate_pattern_preservation(self, state: ConversionState, conversion_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate that regex patterns from QRadar rule are preserved in the conversion."""
+        validation_result = {
+            "warnings": [],
+            "confidence_adjustment": 0.0
+        }
+        
+        context_data = state.get("context_data", {})
+        regex_patterns = context_data.get("regex_patterns", [])
+        target_rule = conversion_result.get("target_rule", "").lower()
+        
+        if not regex_patterns:
+            return validation_result
+        
+        preserved_patterns = 0
+        for pattern_info in regex_patterns:
+            pattern = pattern_info.get("pattern", "")
+            field = pattern_info.get("field", "")
+            analysis = pattern_info.get("analysis", {})
+            
+            # Check if pattern is preserved (exact or adapted)
+            pattern_preserved = False
+            
+            # Check for exact pattern preservation
+            if pattern in conversion_result.get("target_rule", ""):
+                pattern_preserved = True
+                preserved_patterns += 1
+            else:
+                # Check for adapted pattern (common KustoQL adaptations)
+                adapted_patterns = [
+                    pattern.replace("\\", "\\\\"),  # Escaped backslashes
+                    f"@\"{pattern}\"",  # KustoQL verbatim string
+                    pattern.replace("+", "\\+").replace("*", "\\*")  # Escaped special chars
+                ]
+                
+                for adapted in adapted_patterns:
+                    if adapted in conversion_result.get("target_rule", ""):
+                        pattern_preserved = True
+                        preserved_patterns += 1
+                        break
+            
+            if not pattern_preserved:
+                pattern_type = analysis.get("pattern_type", "unknown")
+                validation_result["warnings"].append(
+                    f"Regex pattern '{pattern}' for field '{field}' ({pattern_type}) may not be preserved"
+                )
+        
+        # Adjust confidence based on pattern preservation
+        if regex_patterns:
+            preservation_ratio = preserved_patterns / len(regex_patterns)
+            if preservation_ratio >= 0.8:
+                validation_result["confidence_adjustment"] = 0.1  # Boost confidence
+            elif preservation_ratio >= 0.5:
+                validation_result["confidence_adjustment"] = 0.0  # No change
+            else:
+                validation_result["confidence_adjustment"] = -0.15  # Reduce confidence
+                validation_result["warnings"].append(
+                    f"Only {preserved_patterns}/{len(regex_patterns)} regex patterns preserved"
+                )
+        
+        return validation_result
+    
+    def _validate_kusto_table_usage(self, kusto_query: str) -> List[str]:
+        """Validate KustoQL table usage and suggest improvements."""
+        warnings = []
+        query_lower = kusto_query.lower()
+        
+        # Check if a table is specified
+        common_tables = [
+            'dnsevents', 'securityevent', 'commonsecuritylog', 'syslog',
+            'deviceprocessevents', 'devicenetworkevents', 'devicefileevents',
+            'signinlogs', 'auditlogs', 'windowsevent'
+        ]
+        
+        has_table = any(table in query_lower for table in common_tables)
+        
+        if not has_table:
+            warnings.append("No specific table referenced - query may be too generic")
+        
+        # Check for proper KustoQL operators
+        has_where = '| where' in kusto_query or 'where ' in query_lower
+        has_project = '| project' in kusto_query
+        
+        if not has_where:
+            warnings.append("No 'where' clause found - query may lack filtering")
+        
+        # Check for regex usage when patterns are expected
+        has_regex = any(op in kusto_query for op in ['matches regex', 'matches', 'contains'])
+        
+        return warnings
     
     async def _determine_confidence_threshold(self, state: ConversionState, conversion_result: Dict[str, Any]) -> float:
         """Dynamically determine confidence threshold based on conversion characteristics."""
@@ -797,6 +1313,285 @@ Provide relevant examples with explanations:"""
         except Exception as e:
             logger.error(f"Failed to initialize services: {e}")
             raise
+
+    async def _enhanced_hybrid_retrieval(self, request, similar_rules, pattern_context):
+        """Enhanced hybrid retrieval with Azure Sentinel focus for professional KustoQL examples."""
+        context_items = []
+        
+        # Start with similar rules from initial search
+        for rule in similar_rules[:3]:  # Top 3 similar rules
+            context_items.append({
+                "content": rule.get("content", ""),
+                "metadata": rule.get("metadata", {}),
+                "score": rule.get("score", 0.0),
+                "source": "similar_rules"
+            })
+        
+        # Query Azure Sentinel collections for professional examples
+        if request.target_format.value == "kustoql":
+            azure_examples = await self._query_azure_sentinel_examples(request, pattern_context)
+            context_items.extend(azure_examples)
+        
+        return {
+            "context_items": context_items,
+            "total_items": len(context_items),
+            "azure_sentinel_examples": len([item for item in context_items if item.get("source") == "azure_sentinel"])
+        }
+    
+    async def _query_azure_sentinel_examples(self, request, pattern_context):
+        """Query Azure Sentinel collections for professional KustoQL examples."""
+        azure_examples = []
+        
+        try:
+            # Build search queries based on pattern analysis
+            search_queries = self._build_azure_sentinel_search_queries(request, pattern_context)
+            
+            for query_info in search_queries:
+                # Query azure_sentinel_detections collection
+                try:
+                    detection_results = self.chromadb_service.query_collection(
+                        collection_name="azure_sentinel_detections",
+                        query_text=query_info["query"],
+                        n_results=3,
+                        metadata_filter=query_info.get("metadata_filter")
+                    )
+                    
+                    for result in detection_results.get("documents", []):
+                        azure_examples.append({
+                            "content": result,
+                            "metadata": {
+                                "source_collection": "azure_sentinel_detections",
+                                "query_type": query_info["type"],
+                                "field_names": self._extract_kusto_field_names(result)
+                            },
+                            "score": 0.9,  # High relevance for Azure Sentinel examples
+                            "source": "azure_sentinel"
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to query azure_sentinel_detections: {e}")
+                
+                # Query azure_sentinel_hunting collection
+                try:
+                    hunting_results = self.chromadb_service.query_collection(
+                        collection_name="azure_sentinel_hunting",
+                        query_text=query_info["query"],
+                        n_results=2,
+                        metadata_filter=query_info.get("metadata_filter")
+                    )
+                    
+                    for result in hunting_results.get("documents", []):
+                        azure_examples.append({
+                            "content": result,
+                            "metadata": {
+                                "source_collection": "azure_sentinel_hunting",
+                                "query_type": query_info["type"],
+                                "field_names": self._extract_kusto_field_names(result)
+                            },
+                            "score": 0.85,  # High relevance for hunting queries
+                            "source": "azure_sentinel"
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to query azure_sentinel_hunting: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"Failed to query Azure Sentinel examples: {e}")
+        
+        return azure_examples[:8]  # Limit to top 8 examples
+    
+    def _build_azure_sentinel_search_queries(self, request, pattern_context):
+        """Build targeted search queries for Azure Sentinel collections."""
+        queries = []
+        
+        # Base query from rule content
+        base_query = f"DNS query detection Base64 encoding pattern matching"
+        queries.append({
+            "query": base_query,
+            "type": "general",
+            "metadata_filter": None
+        })
+        
+        # Pattern-specific queries
+        if pattern_context and pattern_context.get("regex_patterns"):
+            for pattern_info in pattern_context["regex_patterns"]:
+                pattern_type = pattern_info.get("pattern_analysis", {}).get("pattern_type", "")
+                
+                if pattern_type == "base64_encoding":
+                    queries.append({
+                        "query": "Base64 DNS query DnsEvents QueryName matches regex pattern variable",
+                        "type": "base64_dns",
+                        "metadata_filter": {"category": "DNS"}
+                    })
+                elif pattern_type == "hex_pattern":
+                    queries.append({
+                        "query": "hexadecimal pattern detection regex matches",
+                        "type": "hex_pattern",
+                        "metadata_filter": None
+                    })
+                elif pattern_type == "domain_pattern":
+                    queries.append({
+                        "query": "domain name pattern DNS resolution detection",
+                        "type": "domain_pattern", 
+                        "metadata_filter": {"category": "DNS"}
+                    })
+        
+        # Field-specific queries
+        field_queries = [
+            "DnsEvents QueryName QueryStatus EventSubType project TimeGenerated",
+            "let pattern variable regex matches where project tostring",
+            "DNS query analysis pattern detection professional KustoQL"
+        ]
+        
+        for field_query in field_queries:
+            queries.append({
+                "query": field_query,
+                "type": "field_mapping",
+                "metadata_filter": None
+            })
+        
+        return queries[:6]  # Limit to 6 queries to avoid overload
+    
+    def _extract_kusto_field_names(self, kusto_content):
+        """Extract field names from KustoQL content."""
+        import re
+        field_names = set()
+        
+        # Common KustoQL field patterns
+        patterns = [
+            r'\b(\w+)\s*==',  # field == value
+            r'\b(\w+)\s*!=',  # field != value  
+            r'\b(\w+)\s*contains',  # field contains
+            r'\b(\w+)\s*matches',  # field matches
+            r'project\s+([^|]+)',  # project fields
+            r'extend\s+(\w+)\s*=',  # extend field =
+            r'summarize.*by\s+([^|]+)',  # summarize by fields
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, kusto_content, re.IGNORECASE)
+            for match in matches:
+                if isinstance(match, tuple):
+                    field_names.update([f.strip() for f in match if f.strip()])
+                else:
+                    # Handle project clause with multiple fields
+                    if 'project' in pattern:
+                        fields = [f.strip() for f in match.split(',')]
+                        field_names.update(fields)
+                    else:
+                        field_names.add(match.strip())
+        
+        # Filter out common KustoQL keywords
+        kusto_keywords = {'where', 'project', 'extend', 'summarize', 'by', 'let', 'and', 'or', 'not', 'in', 'contains', 'matches', 'regex', 'tostring', 'ago', 'between'}
+        return [f for f in field_names if f.lower() not in kusto_keywords and len(f) > 1] 
+
+    async def _generate_kusto_template_with_examples(self, parsed_rule, pattern_context):
+        """Generate professional KustoQL template using Azure Sentinel examples."""
+        template = {
+            "azure_examples": [],
+            "pattern_variables": [],
+            "field_mappings": [],
+            "query_structure": [],
+            "professional_patterns": []
+        }
+        
+        try:
+            # Extract Azure Sentinel examples for the specific pattern type
+            if pattern_context and pattern_context.get("regex_patterns"):
+                for pattern_info in pattern_context["regex_patterns"]:
+                    pattern_analysis = pattern_info.get("pattern_analysis", {})
+                    pattern_type = pattern_analysis.get("pattern_type", "")
+                    
+                    if pattern_type == "base64_encoding":
+                        # Query for Base64 DNS examples
+                        base64_examples = await self._get_base64_dns_examples()
+                        template["azure_examples"].extend(base64_examples)
+                        
+                        # Create pattern variable template
+                        template["pattern_variables"].append({
+                            "name": "Base64Pattern",
+                            "value": f'@"{pattern_info.get("raw_pattern", "")}"',
+                            "description": "Base64 encoding detection pattern",
+                            "usage": "QueryName matches regex Base64Pattern"
+                        })
+                        
+                        # Professional structure template
+                        template["query_structure"] = [
+                            "// Professional KustoQL structure with pattern variables",
+                            "let Base64Pattern = @\"^[A-Za-z0-9+/]{40,}={0,2}$\";",
+                            "DnsEvents",
+                            "| where QueryName matches regex Base64Pattern",
+                            "| where QueryStatus == \"Succeeded\"",
+                            "| where EventSubType in (\"DNS In Progress\", \"DNS Opened\")",
+                            "| project TimeGenerated, SrcIpAddr = tostring(SourceIp), DstIpAddr = tostring(DestinationIp), QueryName, DnsResponseCode"
+                        ]
+            
+            # Add field mapping templates from Azure Sentinel
+            template["field_mappings"] = [
+                {"qradar_field": "DNS Query (custom)", "kusto_field": "QueryName", "conversion": "direct"},
+                {"qradar_field": "Source IP", "kusto_field": "tostring(SourceIp)", "conversion": "type_conversion"},
+                {"qradar_field": "Destination IP", "kusto_field": "tostring(DestinationIp)", "conversion": "type_conversion"},
+                {"qradar_field": "Event Category", "kusto_field": "EventSubType", "conversion": "category_mapping"}
+            ]
+            
+            # Professional formatting patterns
+            template["professional_patterns"] = [
+                "Use 'let' statements for pattern variables",
+                "Add descriptive comments explaining the detection logic",
+                "Use proper field type conversions with tostring()",
+                "Include query status filtering for DNS events",
+                "Map QRadar categories to EventSubType appropriately",
+                "Structure with clear project clause for output fields"
+            ]
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate enhanced KustoQL template: {e}")
+        
+        return template
+    
+    async def _get_base64_dns_examples(self):
+        """Get specific Base64 DNS examples from Azure Sentinel collections."""
+        examples = []
+        
+        try:
+            # Query for Base64 DNS detection examples
+            try:
+                detection_results = self.chromadb_service.query_collection(
+                    collection_name="azure_sentinel_detections",
+                    query_text="Base64 DNS query DnsEvents pattern variable regex matches",
+                    n_results=3
+                )
+                
+                for result in detection_results.get("documents", []):
+                    examples.append({
+                        "content": result,
+                        "type": "detection_rule",
+                        "collection": "azure_sentinel_detections",
+                        "relevance": "base64_dns_pattern"
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to query azure_sentinel_detections for Base64 examples: {e}")
+            
+            # Query hunting queries for additional context
+            try:
+                hunting_results = self.chromadb_service.query_collection(
+                    collection_name="azure_sentinel_hunting",
+                    query_text="DNS Base64 encoding suspicious query pattern detection",
+                    n_results=2
+                )
+                
+                for result in hunting_results.get("documents", []):
+                    examples.append({
+                        "content": result,
+                        "type": "hunting_query",
+                        "collection": "azure_sentinel_hunting", 
+                        "relevance": "base64_dns_hunting"
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to query azure_sentinel_hunting for Base64 examples: {e}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to get Base64 DNS examples: {e}")
+        
+        return examples[:5]  # Return top 5 examples
 
 
 # Global workflow instance

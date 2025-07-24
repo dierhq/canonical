@@ -252,6 +252,123 @@ class ChromaDBService:
             logger.error(f"Failed to delete collection '{collection_name}': {e}")
             raise
     
+    def collection_exists(self, collection_name: str) -> bool:
+        """Check if a collection exists.
+        
+        Args:
+            collection_name: Name of the collection to check
+            
+        Returns:
+            True if collection exists, False otherwise
+        """
+        try:
+            if not self._initialized:
+                return False
+            
+            # Try to get the collection
+            collections = self.client.list_collections()
+            collection_names = [col.name for col in collections]
+            return collection_name in collection_names
+        except Exception as e:
+            logger.error(f"Error checking if collection '{collection_name}' exists: {e}")
+            return False
+    
+    def list_collections(self) -> List[str]:
+        """List all collection names.
+        
+        Returns:
+            List of collection names
+        """
+        try:
+            if not self._initialized:
+                return []
+            
+            collections = self.client.list_collections()
+            return [col.name for col in collections]
+        except Exception as e:
+            logger.error(f"Error listing collections: {e}")
+            return []
+    
+    def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
+        """Get information about a collection.
+        
+        Args:
+            collection_name: Name of the collection
+            
+        Returns:
+            Collection information dictionary
+        """
+        try:
+            if not self._initialized or not self.collection_exists(collection_name):
+                return {"count": 0, "created_date": "unknown"}
+            
+            if collection_name in self.collections:
+                collection = self.collections[collection_name]
+                count = collection.count()
+                metadata = collection.metadata or {}
+                return {
+                    "count": count,
+                    "created_date": metadata.get("created_date", "unknown"),
+                    "metadata": metadata
+                }
+            else:
+                # Try to get collection directly
+                collection = self.client.get_collection(collection_name)
+                count = collection.count()
+                metadata = collection.metadata or {}
+                return {
+                    "count": count,
+                    "created_date": metadata.get("created_date", "unknown"),
+                    "metadata": metadata
+                }
+        except Exception as e:
+            logger.error(f"Error getting collection info for '{collection_name}': {e}")
+            return {"count": 0, "created_date": "unknown"}
+    
+    async def query_collection(
+        self,
+        collection_name: str,
+        query_text: str,
+        n_results: int = 5,
+        where: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Query a collection with text.
+        
+        Args:
+            collection_name: Name of the collection
+            query_text: Query text
+            n_results: Number of results to return
+            where: Optional metadata filter
+            
+        Returns:
+            Query results dictionary
+        """
+        try:
+            if not self._initialized:
+                await self.initialize()
+            
+            if collection_name in self.collections:
+                collection = self.collections[collection_name]
+            else:
+                # Try to get collection directly
+                collection = self.client.get_collection(collection_name)
+            
+            # Generate embedding using our embedding service
+            query_embedding = await embedding_service.embed_text(query_text)
+            
+            # Query the collection with embedding
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where
+            )
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error querying collection '{collection_name}': {e}")
+            return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+    
     async def update_document(
         self,
         collection_name: str,

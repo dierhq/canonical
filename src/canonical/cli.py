@@ -55,8 +55,9 @@ def cli(debug: bool, log_file: Optional[str]):
 @click.argument('target_format', type=click.Choice(['kustoql', 'kibanaql', 'eql', 'qradar', 'spl', 'sigma']))
 @click.option('--source-format', default='sigma', type=click.Choice(['sigma', 'qradar', 'kibanaql']), help='Source format')
 @click.option('--output', '-o', type=click.Path(path_type=Path), help='Output file path')
+@click.option('--org', '--organization', help='Organization name for custom table schemas')
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
-def convert(source_file: Path, target_format: str, source_format: str, output: Optional[Path], verbose: bool):
+def convert(source_file: Path, target_format: str, source_format: str, output: Optional[Path], org: Optional[str], verbose: bool):
     """Convert a rule from source format to target format."""
     async def _convert():
         try:
@@ -64,11 +65,19 @@ def convert(source_file: Path, target_format: str, source_format: str, output: O
             with open(source_file, 'r', encoding='utf-8') as f:
                 source_rule = f.read()
             
+            # Prepare context with organization if provided
+            context = {}
+            if org:
+                context['organization'] = org
+                click.echo(f"Using custom tables for organization: {org}")
+            # Note: If no org provided, the workflow will auto-detect available custom tables
+            
             # Convert rule
             response = await rule_converter.convert_rule(
                 source_rule=source_rule,
                 source_format=SourceFormat(source_format),
-                target_format=TargetFormat(target_format)
+                target_format=TargetFormat(target_format),
+                context=context
             )
             
             if response.success:
@@ -638,6 +647,182 @@ def serve(host: str, port: int, reload: bool):
         reload=reload,
         log_level=settings.log_level.lower()
     )
+
+
+@cli.group()
+def schema():
+    """Manage custom table schemas for organization-specific data."""
+    pass
+
+
+@schema.command("add-custom-tables")
+@click.argument('schema_file', type=click.Path(exists=True, path_type=Path))
+@click.option('--org', '--organization', required=True, help='Organization name')
+@click.option('--validate-only', is_flag=True, help='Only validate schema without adding')
+def add_custom_tables(schema_file: Path, org: str, validate_only: bool):
+    """Add custom table schemas from JSON file.
+    
+    Example:
+        canonical schema add-custom-tables custom_tables.json --org acme
+    """
+    async def _add_custom_tables():
+        try:
+            from .services.custom_tables import custom_table_service
+            
+            if validate_only:
+                # Only validate the schema
+                import json
+                with open(schema_file, 'r', encoding='utf-8') as f:
+                    schema_data = json.load(f)
+                
+                is_valid, errors = custom_table_service.validate_schema(schema_data)
+                if is_valid:
+                    click.echo(click.style("✓ Schema validation passed", fg='green'))
+                    schema = custom_table_service.parse_schema(schema_data, org)
+                    click.echo(f"Found {len(schema.tables)} tables:")
+                    for table in schema.tables:
+                        click.echo(f"  - {table.name} ({len(table.columns)} columns)")
+                else:
+                    click.echo(click.style("✗ Schema validation failed:", fg='red'))
+                    for error in errors:
+                        click.echo(f"  {error}")
+                    sys.exit(1)
+            else:
+                # Add the custom tables
+                success, message = await custom_table_service.add_custom_tables(schema_file, org)
+                if success:
+                    click.echo(click.style(f"✓ {message}", fg='green'))
+                else:
+                    click.echo(click.style(f"✗ {message}", fg='red'))
+                    sys.exit(1)
+                    
+        except Exception as e:
+            click.echo(click.style(f"Error: {str(e)}", fg='red'))
+            sys.exit(1)
+    
+    asyncio.run(_add_custom_tables())
+
+
+@schema.command("list-custom-tables")
+@click.option('--org', '--organization', help='Organization name (show all if not specified)')
+def list_custom_tables(org: Optional[str]):
+    """List custom table schemas.
+    
+    Example:
+        canonical schema list-custom-tables --org acme
+        canonical schema list-custom-tables  # List all organizations
+    """
+    async def _list_custom_tables():
+        try:
+            from .services.custom_tables import custom_table_service
+            
+            tables = await custom_table_service.list_custom_tables(org)
+            
+            if not tables:
+                if org:
+                    click.echo(f"No custom tables found for organization '{org}'")
+                else:
+                    click.echo("No custom tables found")
+                return
+            
+            click.echo("Custom Table Schemas:")
+            click.echo("-" * 50)
+            
+            for table_info in tables:
+                click.echo(f"Organization: {table_info['organization']}")
+                click.echo(f"Collection: {table_info['collection']}")
+                click.echo(f"Table Count: {table_info['table_count']}")
+                click.echo(f"Created: {table_info['created_date']}")
+                click.echo("-" * 50)
+                
+        except Exception as e:
+            click.echo(click.style(f"Error: {str(e)}", fg='red'))
+            sys.exit(1)
+    
+    asyncio.run(_list_custom_tables())
+
+
+@schema.command("remove-custom-tables")
+@click.option('--org', '--organization', required=True, help='Organization name')
+@click.option('--confirm', is_flag=True, help='Skip confirmation prompt')
+def remove_custom_tables(org: str, confirm: bool):
+    """Remove custom table schemas for an organization.
+    
+    Example:
+        canonical schema remove-custom-tables --org acme --confirm
+    """
+    async def _remove_custom_tables():
+        try:
+            from .services.custom_tables import custom_table_service
+            
+            if not confirm:
+                click.echo(f"This will remove ALL custom tables for organization '{org}'")
+                if not click.confirm("Are you sure you want to continue?"):
+                    click.echo("Operation cancelled")
+                    return
+            
+            success, message = await custom_table_service.remove_custom_tables(org)
+            if success:
+                click.echo(click.style(f"✓ {message}", fg='green'))
+            else:
+                click.echo(click.style(f"✗ {message}", fg='red'))
+                sys.exit(1)
+                
+        except Exception as e:
+            click.echo(click.style(f"Error: {str(e)}", fg='red'))
+            sys.exit(1)
+    
+    asyncio.run(_remove_custom_tables())
+
+
+@schema.command("validate")
+@click.argument('schema_file', type=click.Path(exists=True, path_type=Path))
+def validate_schema(schema_file: Path):
+    """Validate a custom table schema file.
+    
+    Example:
+        canonical schema validate custom_tables.json
+    """
+    async def _validate_schema():
+        try:
+            from .services.custom_tables import custom_table_service
+            import json
+            
+            with open(schema_file, 'r', encoding='utf-8') as f:
+                schema_data = json.load(f)
+            
+            is_valid, errors = custom_table_service.validate_schema(schema_data)
+            
+            if is_valid:
+                click.echo(click.style("✓ Schema validation passed", fg='green'))
+                
+                # Show schema summary
+                schema = custom_table_service.parse_schema(schema_data)
+                click.echo(f"\nSchema Summary:")
+                click.echo(f"  Organization: {schema.organization or 'Not specified'}")
+                click.echo(f"  Version: {schema.version}")
+                click.echo(f"  Tables: {len(schema.tables)}")
+                
+                for table in schema.tables:
+                    click.echo(f"    - {table.name} ({len(table.columns)} columns)")
+                    if table.description:
+                        click.echo(f"      Description: {table.description}")
+                    if table.retentionInDays:
+                        click.echo(f"      Retention: {table.retentionInDays} days")
+            else:
+                click.echo(click.style("✗ Schema validation failed:", fg='red'))
+                for error in errors:
+                    click.echo(f"  {error}")
+                sys.exit(1)
+                
+        except json.JSONDecodeError as e:
+            click.echo(click.style(f"Invalid JSON: {str(e)}", fg='red'))
+            sys.exit(1)
+        except Exception as e:
+            click.echo(click.style(f"Error: {str(e)}", fg='red'))
+            sys.exit(1)
+    
+    asyncio.run(_validate_schema())
 
 
 def main():

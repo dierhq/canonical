@@ -269,3 +269,37 @@ class KibanaQLRule(BaseModel):
     mitre_techniques: List[str] = Field(default_factory=list)
     complexity: str = "medium"
     is_valid: bool = True 
+
+
+class CustomTableColumn(BaseModel):
+    """Custom table column definition."""
+    name: str
+    type: str  # e.g., "string", "int", "datetime", "dynamic", "double"
+    description: Optional[str] = None
+    common_values: List[str] = Field(default_factory=list)
+    required: bool = False
+    indexed: bool = False
+
+
+class CustomTable(BaseModel):
+    """Custom table definition for organization-specific schemas."""
+    name: str
+    columns: List[CustomTableColumn]
+    description: Optional[str] = None
+    retentionInDays: Optional[int] = None
+    target_formats: List[str] = Field(default_factory=lambda: ["kustoql"])
+    examples: List[Dict[str, str]] = Field(default_factory=list)
+    
+    # Metadata
+    organization: Optional[str] = None
+    created_date: Optional[str] = None
+    last_modified: Optional[str] = None
+
+
+class CustomTableSchema(BaseModel):
+    """Schema for custom table definitions."""
+    organization: Optional[str] = None
+    description: Optional[str] = None
+    tables: List[CustomTable]
+    version: Optional[str] = "1.0"
+    created_date: Optional[str] = None 

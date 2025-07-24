@@ -8,6 +8,7 @@ from loguru import logger
 
 from .chromadb import chromadb_service
 from .embedding import embedding_service
+from .custom_tables import custom_table_service
 
 
 class HybridRetrievalService:
@@ -16,6 +17,7 @@ class HybridRetrievalService:
     def __init__(self):
         self.chromadb_service = chromadb_service
         self.embedding_service = embedding_service
+        self.custom_table_service = custom_table_service
         self._initialized = False
     
     async def initialize(self) -> None:
@@ -27,68 +29,91 @@ class HybridRetrievalService:
     
     async def retrieve_context_for_conversion(
         self,
-        rule_content: str,
         source_format: str,
         target_format: str,
-        max_results: int = 5
+        rule_summary: str,
+        parsed_rule: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Retrieve relevant context for rule conversion with enhanced examples."""
-        await self.initialize()
+        """Retrieve context for rule conversion using hybrid approach.
+        
+        Args:
+            source_format: Source rule format
+            target_format: Target rule format
+            rule_summary: Summary of the rule for context retrieval
+            parsed_rule: Optional parsed rule data
+            context: Optional context including organization info
+            
+        Returns:
+            Dictionary containing retrieved context
+        """
+        if not self._initialized:
+            await self.initialize()
+        
+        logger.info(f"Retrieving context for {source_format} -> {target_format} conversion")
+        
+        # Initialize context data
+        context_data = {
+            "similar_rules": [],
+            "schema_info": [],
+            "examples": [],
+            "custom_tables": []
+        }
         
         try:
-            # Search for similar rules and examples
-            semantic_results = await self._semantic_search(rule_content, max_results, "azure_sentinel_detections")
+            # 1. Get similar rules from standard collections
+            similar_rules = await self._get_similar_rules(source_format, target_format, rule_summary)
+            context_data["similar_rules"] = similar_rules
             
-            # Search for format-specific examples
-            format_results = await self._format_specific_search(source_format, target_format, max_results)
+            # 2. Get schema information for target format
+            schema_info = await self._get_schema_info(target_format)
+            context_data["schema_info"] = schema_info
             
-            # Combine and deduplicate results
-            combined_results = self._combine_results(semantic_results, format_results)
+            # 3. Get conversion examples
+            examples = await self._get_conversion_examples(source_format, target_format)
+            context_data["examples"] = examples
             
-            # Extract structured patterns from the results
-            structured_context = self._extract_structured_patterns(
-                combined_results, 
-                rule_content, 
-                source_format, 
-                target_format
+            # 4. NEW: Get custom tables if organization is provided
+            if context and context.get("organization"):
+                organization = context["organization"]
+                logger.info(f"Retrieving custom tables for organization: {organization}")
+                
+                try:
+                    custom_tables = await self.custom_table_service.search_custom_tables(
+                        query=rule_summary,
+                        organization=organization,
+                        n_results=3
+                    )
+                    context_data["custom_tables"] = custom_tables
+                    logger.info(f"Found {len(custom_tables)} custom table schemas for {organization}")
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve custom tables for {organization}: {e}")
+            
+            # Log context summary
+            total_items = (
+                len(context_data["similar_rules"]) + 
+                len(context_data["schema_info"]) + 
+                len(context_data["examples"]) +
+                len(context_data["custom_tables"])
             )
-            
-            return {
-                "success": True,
-                "context": combined_results,
-                "semantic_results": len(semantic_results),
-                "format_results": len(format_results),
-                "total_results": len(combined_results),
-                "field_names": structured_context.get("field_mappings", []),
-                "table_examples": structured_context.get("table_examples", []),
-                "query_patterns": structured_context.get("query_patterns", []),
-                "regex_patterns": structured_context.get("regex_patterns", []),  # Add regex patterns
-                "similar_rules": structured_context.get("similar_rules_formatted", "")
-            }
+            logger.info(f"Retrieved {total_items} total context items")
             
         except Exception as e:
-            logger.error(f"Error retrieving context for conversion: {e}")
-            return {
-                "success": False,
-                "context": [],
-                "error": str(e),
-                "field_names": [],
-                "table_examples": [],
-                "query_patterns": [],
-                "regex_patterns": []  # Add regex patterns to error case too
-            }
+            logger.error(f"Error retrieving conversion context: {e}")
+        
+        return context_data
     
     def _extract_structured_patterns(
         self, 
         results: List[Dict[str, Any]], 
-        rule_content: str, 
         source_format: str, 
-        target_format: str
+        target_format: str,
+        organization: Optional[str] = None
     ) -> Dict[str, Any]:
         """Extract structured patterns from similar rules for better context."""
         
         # Detect rule category from content
-        rule_category = self._detect_rule_category(rule_content)
+        rule_category = self._detect_rule_category(results[0].get("content", "")) if results else "general"
         
         # Extract relevant patterns based on target format
         if target_format.lower() == "kustoql":
@@ -303,10 +328,24 @@ class HybridRetrievalService:
             logger.error(f"Error in format-specific search: {e}")
             return []
     
+    async def _search_custom_tables(self, query: str, organization: str, max_results: int) -> List[Dict[str, Any]]:
+        """Search custom tables for relevant examples."""
+        try:
+            results = await self.custom_table_service.search_custom_tables(
+                query=query,
+                organization=organization,
+                n_results=max_results
+            )
+            return results
+        except Exception as e:
+            logger.error(f"Error searching custom tables: {e}")
+            return []
+
     def _combine_results(
         self,
         semantic_results: List[Dict[str, Any]],
-        format_results: List[Dict[str, Any]]
+        format_results: List[Dict[str, Any]],
+        custom_results: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Combine and deduplicate search results."""
         combined = []
@@ -322,6 +361,13 @@ class HybridRetrievalService:
         
         # Add format results that weren't already included
         for result in format_results:
+            doc_content = result.get("document", "")[:100]  # First 100 chars as unique identifier
+            if doc_content and doc_content not in seen_docs:
+                combined.append(result)
+                seen_docs.add(doc_content)
+        
+        # Add custom results that weren't already included
+        for result in custom_results:
             doc_content = result.get("document", "")[:100]  # First 100 chars as unique identifier
             if doc_content and doc_content not in seen_docs:
                 combined.append(result)
