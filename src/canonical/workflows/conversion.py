@@ -476,6 +476,7 @@ Provide relevant examples with explanations:"""
                 source_rule=state["enhanced_rule"],  # Use enhanced rule
                 source_format=request.source_format.value,
                 target_format=request.target_format.value,
+                context=state.get("context_data", {}),  # Pass enhanced context
                 max_retries=2
             )
             
@@ -624,56 +625,47 @@ Provide relevant examples with explanations:"""
         return state
     
     async def _determine_confidence_threshold(self, state: ConversionState, conversion_result: Dict[str, Any]) -> float:
-        """Dynamically determine confidence threshold using Foundation-Sec-8B's cybersecurity expertise."""
+        """Dynamically determine confidence threshold based on conversion characteristics."""
         try:
             request = state["request"]
             
-            # Ask Foundation-Sec-8B to determine appropriate confidence threshold
-            threshold_prompt = f"""As a cybersecurity expert, determine the minimum confidence threshold for this SIEM rule conversion:
-
-SOURCE: {request.source_format.value}
-TARGET: {request.target_format.value}
-CONVERSION_METHOD: {conversion_result.get('conversion_method', 'unknown')}
-GENERATED_RULE_LENGTH: {len(conversion_result.get('target_rule', ''))}
-
-Consider:
-- Rule criticality and security impact
-- Conversion complexity and reliability
-- Target platform requirements
-- Acceptable risk level for automated deployment
-
-What minimum confidence score (0.0-1.0) would you require before accepting this conversion?
-Consider that this is for automated SIEM rule deployment.
-
-Respond with only a decimal number between 0.1 and 0.9:"""
-
-            response = await llm_service.generate_response(threshold_prompt, max_tokens=50, use_cybersec_optimization=True)
+            # Dynamic threshold calculation based on objective factors
+            base_threshold = 0.35
             
-            # Parse the threshold
-            try:
-                threshold = float(response.strip())
-                # Ensure it's within reasonable bounds
-                return max(0.1, min(0.9, threshold))
-            except ValueError:
-                logger.warning("Failed to parse confidence threshold from Foundation-Sec-8B")
+            # Adjust based on source format complexity
+            source_adjustments = {
+                "sigma": 0.0,      # Well-structured, easier to convert
+                "qradar": 0.1,     # More complex, needs higher threshold
+                "kibanaql": 0.05,  # Moderate complexity
+            }
             
-            # Intelligent fallback based on conversion characteristics
-            conversion_method = conversion_result.get('conversion_method', 'unknown')
-            rule_length = len(conversion_result.get('target_rule', ''))
+            # Adjust based on target format requirements
+            target_adjustments = {
+                "kustoql": 0.0,    # Good LLM support
+                "spl": 0.05,       # Moderate LLM support
+                "elastic": 0.1,    # More complex structure
+            }
             
-            # Lower threshold for specialized converters (more reliable)
-            if conversion_method == 'specialized_converter':
-                return 0.2
-            # Higher threshold for LLM conversions
-            elif conversion_method in ['enhanced_llm', 'intelligent_llm']:
-                return 0.4 if rule_length > 100 else 0.5
-            # Medium threshold for hybrid approaches
-            else:
-                return 0.35
-                
+            # Apply adjustments
+            threshold = base_threshold
+            threshold += source_adjustments.get(request.source_format.value, 0.05)
+            threshold += target_adjustments.get(request.target_format.value, 0.05)
+            
+            # Adjust based on context quality
+            context_data = state.get("context_data", {})
+            if context_data.get("field_names") and len(context_data["field_names"]) > 0:
+                threshold -= 0.05  # Good context reduces required threshold
+            
+            if context_data.get("similar_rules_found", 0) >= 5:
+                threshold -= 0.05  # Many similar rules available
+            
+            # Ensure reasonable bounds
+            return max(0.2, min(0.7, threshold))
+            
         except Exception as e:
             logger.warning(f"Failed to determine confidence threshold: {e}")
-            return 0.3  # Conservative fallback
+            # Safe fallback
+            return 0.35
     
     async def _create_response_node(self, state: ConversionState) -> ConversionState:
         """Create the final response."""

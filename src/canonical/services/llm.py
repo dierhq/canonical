@@ -23,6 +23,13 @@ from ..core.config import settings
 from ..core.models import TargetFormat
 
 
+# Global shared model instances (singleton pattern)
+_shared_tokenizer = None
+_shared_model = None  
+_shared_pipeline = None
+_model_lock = asyncio.Lock()
+
+
 class FoundationSecLLMService:
     """Foundation-Sec-8B language model service for cybersecurity tasks."""
     
@@ -37,7 +44,7 @@ class FoundationSecLLMService:
         self.model_name = model_name or settings.llm_model
         self.device = device or settings.llm_device
         
-        # Model instances
+        # Reference to shared instances
         self.tokenizer = None
         self.model = None
         self.pipeline = None
@@ -53,73 +60,91 @@ class FoundationSecLLMService:
         }
         
     async def initialize(self) -> None:
-        """Initialize the Foundation-Sec-8B model."""
-        try:
-            logger.info(f"Loading Foundation-Sec-8B model: {self.model_name}")
+        """Initialize the Foundation-Sec-8B model using shared instances."""
+        global _shared_tokenizer, _shared_model, _shared_pipeline
+        
+        async with _model_lock:
+            # If shared instances already exist, reuse them
+            if _shared_tokenizer is not None and _shared_model is not None:
+                logger.info("Reusing existing Foundation-Sec-8B model instance")
+                self.tokenizer = _shared_tokenizer
+                self.model = _shared_model  
+                self.pipeline = _shared_pipeline
+                self.initialized = True
+                return
             
-            # Determine device and dtype
-            device_map = self._get_device_map(self.device)
-            torch_dtype = self._get_torch_dtype(self.device)
-            
-            # Load tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name,
-                trust_remote_code=False  # Foundation-Sec-8B doesn't need custom code
-            )
-            
-            # Set pad token if not present
-            if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
-            
-            # Determine if quantization should be used
-            use_quantization = self._should_use_quantization()
-            
-            # Load model with optimizations
-            model_kwargs = {
-                "torch_dtype": torch_dtype,
-                "device_map": device_map,
-                "trust_remote_code": False
-            }
-            
-            # Add quantization if needed
-            if use_quantization:
-                try:
-                    from transformers import BitsAndBytesConfig
-                    quantization_config = BitsAndBytesConfig(
-                        load_in_4bit=True,
-                        bnb_4bit_compute_dtype=torch.float16,
-                        bnb_4bit_use_double_quant=True,
-                        bnb_4bit_quant_type="nf4"
-                    )
-                    model_kwargs["quantization_config"] = quantization_config
-                    logger.info("Using 4-bit quantization for Foundation-Sec-8B")
-                except ImportError:
-                    logger.warning("BitsAndBytesConfig not available, loading without quantization")
-            
-            # Add flash attention if available
-            if self._supports_flash_attention():
-                model_kwargs["attn_implementation"] = "flash_attention_2"
-                logger.info("Using Flash Attention 2 for improved performance")
-            
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                **model_kwargs
-            )
-            
-            # Create pipeline
-            self.pipeline = pipeline(
-                "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                torch_dtype=torch_dtype
-            )
-            
-            self.initialized = True
-            logger.info(f"Foundation-Sec-8B loaded successfully on {self.device}")
-            
-        except Exception as e:
-            logger.error(f"Failed to load Foundation-Sec-8B: {e}")
-            raise RuntimeError(f"Foundation-Sec-8B initialization failed: {e}")
+            # Load the model only once
+            try:
+                logger.info(f"Loading Foundation-Sec-8B model: {self.model_name}")
+                
+                # Determine device and dtype
+                device_map = self._get_device_map(self.device)
+                torch_dtype = self._get_torch_dtype(self.device)
+                
+                # Load tokenizer
+                _shared_tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_name,
+                    trust_remote_code=False  # Foundation-Sec-8B doesn't need custom code
+                )
+                
+                # Set pad token if not present
+                if _shared_tokenizer.pad_token is None:
+                    _shared_tokenizer.pad_token = _shared_tokenizer.eos_token
+                
+                # Determine if quantization should be used
+                use_quantization = self._should_use_quantization()
+                
+                # Load model with optimizations
+                model_kwargs = {
+                    "torch_dtype": torch_dtype,
+                    "device_map": device_map,
+                    "trust_remote_code": False
+                }
+                
+                # Add quantization if needed
+                if use_quantization:
+                    try:
+                        from transformers import BitsAndBytesConfig
+                        quantization_config = BitsAndBytesConfig(
+                            load_in_4bit=True,
+                            bnb_4bit_compute_dtype=torch.float16,
+                            bnb_4bit_use_double_quant=True,
+                            bnb_4bit_quant_type="nf4"
+                        )
+                        model_kwargs["quantization_config"] = quantization_config
+                        logger.info("Using 4-bit quantization for Foundation-Sec-8B")
+                    except ImportError:
+                        logger.warning("BitsAndBytesConfig not available, loading without quantization")
+                
+                # Add flash attention if available
+                if self._supports_flash_attention():
+                    model_kwargs["attn_implementation"] = "flash_attention_2"
+                    logger.info("Using Flash Attention 2 for improved performance")
+                
+                _shared_model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name,
+                    **model_kwargs
+                )
+                
+                # Create pipeline
+                _shared_pipeline = pipeline(
+                    "text-generation",
+                    model=_shared_model,
+                    tokenizer=_shared_tokenizer,
+                    torch_dtype=torch_dtype
+                )
+                
+                # Set instance references
+                self.tokenizer = _shared_tokenizer
+                self.model = _shared_model
+                self.pipeline = _shared_pipeline
+                self.initialized = True
+                
+                logger.info(f"Foundation-Sec-8B loaded successfully on {self.device}")
+                
+            except Exception as e:
+                logger.error(f"Failed to load Foundation-Sec-8B: {e}")
+                raise RuntimeError(f"Foundation-Sec-8B initialization failed: {e}")
     
     def _get_device_map(self, device: str) -> str:
         """Get appropriate device mapping."""
@@ -151,10 +176,11 @@ class FoundationSecLLMService:
             return False
         
         try:
-            # Check available GPU memory
-            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9  # GB
-            # Use quantization if GPU has less than 24GB memory
-            return gpu_memory < 24
+            available_memory = torch.cuda.mem_get_info()[0] / 1e9  # Available memory in GB
+            threshold = 12.0  # Fixed threshold for Foundation-Sec-8B
+            
+            # Use quantization only if available memory is insufficient
+            return available_memory < threshold
         except:
             return True  # Default to quantization for safety
     
@@ -175,22 +201,25 @@ class FoundationSecLLMService:
         try:
             max_tokens = max_tokens or settings.llm_max_tokens
             
-            # Use cybersecurity-optimized parameters
+            # Base generation parameters
             generation_params = {
-                "max_new_tokens": max_tokens,
-                "temperature": settings.llm_temperature,
+                "max_new_tokens": min(max_tokens, settings.llm_max_tokens),
+                "temperature": max(0.7, settings.llm_temperature),  # Ensure minimum creativity
+                "top_p": 0.9,
                 "do_sample": True,
                 "pad_token_id": self.tokenizer.eos_token_id,
-                "return_full_text": False,
-                "repetition_penalty": 1.1,
-                "top_p": 0.9
+                "eos_token_id": self.tokenizer.eos_token_id,
+                "return_full_text": False,  # Only return generated text, not prompt
             }
             
+            # Apply cybersecurity optimization if enabled
             if use_cybersec_optimization:
-                # Adjust parameters for cybersecurity tasks
-                generation_params["temperature"] = 0.1  # Lower temperature for more focused output
-                generation_params["top_p"] = 0.8  # Slightly more focused sampling
-                generation_params["repetition_penalty"] = 1.2  # Reduce repetition
+                generation_params.update({
+                    "top_k": 50,
+                    "repetition_penalty": 1.15,  # Slightly higher to avoid repetition
+                    "min_length": 20,  # Force some minimum generation
+                    "temperature": 0.8,  # Override with higher creativity for cybersec
+                })
             
             # Run generation in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -308,73 +337,97 @@ class FoundationSecLLMService:
         return await self.convert_qradar_rule(qradar_rule, TargetFormat.KUSTOQL, context)
     
     def _build_conversion_prompt(self, sigma_rule: str, target_format: TargetFormat, context: Optional[Dict[str, Any]] = None) -> str:
-        """Build a conversion prompt for Foundation-Sec-8B."""
-        context_str = ""
-        if context and context.get("similar_rules"):
-            context_str = f"\nRelevant context from similar rules:\n{context['similar_rules'][:500]}..."
-        
+        """Build a conversion prompt for Foundation-Sec-8B with enhanced context."""
         format_name = target_format.value.upper()
         
-        prompt = f"""You are a cybersecurity expert specializing in SIEM rule conversion. Convert this Sigma detection rule to {format_name} format.
+        # Build context from enhanced ChromaDB patterns
+        context_str = self._build_enhanced_context_string(context, format_name)
+        
+        prompt = f"""Convert the following Sigma rule to {format_name}:
 
-Input Sigma Rule:
 {sigma_rule}
 {context_str}
 
-Generate a high-quality {format_name} rule that:
-1. Preserves the original detection logic
-2. Uses appropriate {format_name} syntax and functions
-3. Maintains the same security effectiveness
-4. Includes proper field mappings
-
-Output the converted {format_name} rule:"""
+{format_name} Query:
+```{format_name.lower()}
+"""
 
         return prompt
     
     def _build_qradar_conversion_prompt(self, qradar_rule: str, target_format: TargetFormat, context: Optional[Dict[str, Any]] = None) -> str:
-        """Build a QRadar conversion prompt for Foundation-Sec-8B."""
-        context_str = ""
-        if context and context.get("similar_rules"):
-            context_str = f"\nRelevant context from similar rules:\n{context['similar_rules'][:500]}..."
-        
+        """Build a QRadar conversion prompt for Foundation-Sec-8B with enhanced context."""
         format_name = target_format.value.upper()
         
-        # Format-specific guidance
-        format_guidance = {
-            "KUSTOQL": "Uses Azure Sentinel tables (SecurityEvent, CommonSecurityLog, etc.) with KustoQL syntax",
-            "SIGMA": "Uses Sigma detection rule format with proper field mappings",
-            "SPL": "Uses Splunk Processing Language with appropriate data models",
-            "EQL": "Uses Event Query Language with proper event correlation",
-            "AQL": "Uses IBM QRadar AQL (optimization/validation)"
-        }
+        # Build context from enhanced ChromaDB patterns  
+        context_str = self._build_enhanced_context_string(context, format_name)
         
-        guidance = format_guidance.get(format_name, f"Uses {format_name} query language syntax")
-        
-        prompt = f"""You are a cybersecurity expert specializing in SIEM rule conversion. Convert this QRadar rule to {format_name} format.
+        prompt = f"""Convert the following QRadar rule to {format_name}:
 
-Input QRadar Rule:
 {qradar_rule}
 {context_str}
 
-Convert this QRadar rule to a production-ready {format_name} query that:
-1. Preserves the original detection logic and thresholds
-2. {guidance}
-3. Implements proper syntax with correct operators
-4. Maintains the same security effectiveness and alert conditions
-5. Includes time windows, aggregations, and filtering as needed
-
-Generate the complete {format_name} query:"""
+{format_name} Query:
+```{format_name.lower()}
+"""
 
         return prompt
+    
+    def _build_enhanced_context_string(self, context: Optional[Dict[str, Any]], format_name: str) -> str:
+        """Build enhanced context string from ChromaDB patterns."""
+        if not context:
+            return ""
+        
+        context_parts = []
+        
+        # Add table usage guidance
+        table_examples = context.get("table_examples", [])
+        if table_examples:
+            context_parts.append(f"\nCommon {format_name} tables: {', '.join(table_examples[:3])}")
+        
+        # Add field mapping guidance
+        field_mappings = context.get("field_names", [])
+        if field_mappings:
+            context_parts.append(f"\nField mappings: {', '.join(field_mappings[:3])}")
+        
+        # Add regex pattern examples from similar rules
+        regex_patterns = context.get("regex_patterns", [])
+        logger.debug(f"Retrieved {len(regex_patterns)} regex patterns from context: {regex_patterns}")
+        if regex_patterns:
+            context_parts.append(f"\nRegex patterns from similar rules:")
+            for pattern in regex_patterns[:3]:  # Use top 3 patterns
+                if pattern.strip():
+                    context_parts.append(f"  {pattern.strip()}")
+        
+        # Add query pattern examples
+        query_patterns = context.get("query_patterns", [])
+        if query_patterns:
+            context_parts.append(f"\nExample query structures:")
+            for i, pattern in enumerate(query_patterns[:2], 1):
+                if pattern.strip():
+                    context_parts.append(f"{pattern.strip()}")
+        
+        # Add similar rules context
+        similar_rules = context.get("similar_rules", "")
+        if similar_rules:
+            context_parts.append(f"\n{similar_rules}")
+        
+        final_context = "\n".join(context_parts)
+        logger.debug(f"Built context string length: {len(final_context)}")
+        return final_context
     
     def _parse_conversion_response(self, response: str, target_format: TargetFormat) -> Dict[str, Any]:
         """Parse Foundation-Sec-8B conversion response."""
         try:
+            logger.debug(f"Parsing response for target format: {target_format}")
+            logger.debug(f"Raw response length: {len(response)}")
+            
             # Extract the converted rule from the response
             converted_rule = self._extract_rule_from_response(response, target_format)
+            logger.debug(f"Extracted rule: {repr(converted_rule)}")
             
             # Calculate confidence based on response quality
             confidence = self._calculate_confidence(response, converted_rule)
+            logger.debug(f"Calculated confidence: {confidence}")
             
             # Generate explanation
             explanation = f"Successfully converted using Foundation-Sec-8B to {target_format.value.upper()} format with {confidence:.1%} confidence"
@@ -389,6 +442,8 @@ Generate the complete {format_name} query:"""
             
         except Exception as e:
             logger.error(f"Failed to parse conversion response: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return {
                 "success": False,
                 "target_rule": None,
@@ -397,21 +452,21 @@ Generate the complete {format_name} query:"""
                 "error_message": str(e)
             }
     
-    def _parse_qradar_conversion_response(self, response: str) -> Dict[str, Any]:
-        """Parse QRadar to KustoQL conversion response."""
+    def _parse_qradar_conversion_response(self, response: str, target_format: TargetFormat) -> Dict[str, Any]:
+        """Parse QRadar conversion response for any target format."""
         try:
-            # Extract KustoQL query from response
-            kustoql_query = self._extract_kustoql_from_response(response)
+            # Use the same unified extraction logic we fixed for Sigma
+            converted_rule = self._extract_rule_from_response(response, target_format)
             
-            # Calculate confidence
-            confidence = self._calculate_kustoql_confidence(kustoql_query)
+            # Calculate confidence based on response quality
+            confidence = self._calculate_confidence(response, converted_rule)
             
             # Generate explanation
-            explanation = f"QRadar rule converted to KustoQL using Foundation-Sec-8B with {confidence:.1%} confidence"
+            explanation = f"QRadar rule converted to {target_format.value.upper()} using Foundation-Sec-8B with {confidence:.1%} confidence"
             
             return {
                 "success": True,
-                "target_rule": kustoql_query,
+                "target_rule": converted_rule,
                 "confidence_score": confidence,
                 "explanation": explanation,
                 "model_used": "Foundation-Sec-8B"
@@ -419,6 +474,8 @@ Generate the complete {format_name} query:"""
             
         except Exception as e:
             logger.error(f"Failed to parse QRadar conversion response: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return {
                 "success": False,
                 "target_rule": None,
@@ -429,23 +486,62 @@ Generate the complete {format_name} query:"""
     
     def _extract_rule_from_response(self, response: str, target_format: TargetFormat) -> str:
         """Extract the converted rule from Foundation-Sec-8B response."""
-        # Look for code blocks first
+        if not response or not response.strip():
+            return ""
+        
         import re
         
-        # Format-specific patterns
+        # Try different extraction strategies in order of preference
+        
+        # 1. Look for format-specific code blocks
+        format_patterns = {
+            TargetFormat.KUSTOQL: [r'```(?:kql|kusto|kustoql)\s*\n(.*?)\n```', r'```\s*\n(.*?)\n```'],
+            TargetFormat.SPL: [r'```(?:spl|splunk)\s*\n(.*?)\n```', r'```\s*\n(.*?)\n```'],
+            TargetFormat.EQL: [r'```(?:eql|elastic)\s*\n(.*?)\n```', r'```\s*\n(.*?)\n```'],
+            TargetFormat.SIGMA: [r'```(?:sigma|yml|yaml)\s*\n(.*?)\n```', r'```\s*\n(.*?)\n```'],
+        }
+        
+        if target_format in format_patterns:
+            for pattern in format_patterns[target_format]:
+                match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
+                if match:
+                    return match.group(1).strip()
+        
+        # 2. Extract content based on target format keywords
         if target_format == TargetFormat.KUSTOQL:
-            # Look for KustoQL patterns
-            kusto_match = re.search(r'```(?:kql|kusto)?\s*\n(.*?)\n```', response, re.DOTALL | re.IGNORECASE)
-            if kusto_match:
-                return kusto_match.group(1).strip()
+            # Look for KustoQL patterns in the response
+            kusto_keywords = ['| where', '| project', '| summarize', '| join', 'DeviceProcessEvents', 
+                             'SecurityEvent', 'SigninLogs', 'let ', 'search ']
+            lines = [line.strip() for line in response.split('\n') if line.strip()]
+            
+            # Find lines with KustoQL syntax
+            relevant_lines = []
+            for line in lines:
+                if any(keyword in line for keyword in kusto_keywords):
+                    relevant_lines.append(line)
+            
+            if relevant_lines:
+                return '\n'.join(relevant_lines)
         
-        # Generic code block extraction
-        code_match = re.search(r'```\s*\n(.*?)\n```', response, re.DOTALL)
-        if code_match:
-            return code_match.group(1).strip()
-        
-        # Fall back to the entire response if no code blocks found
-        return response.strip()
+        elif target_format == TargetFormat.SPL:
+            # Look for Splunk SPL patterns
+            spl_keywords = ['index=', 'sourcetype=', '| eval', '| stats', '| search']
+            lines = [line.strip() for line in response.split('\n') if line.strip()]
+            
+            relevant_lines = []
+            for line in lines:
+                if any(keyword in line for keyword in spl_keywords):
+                    relevant_lines.append(line)
+            
+            if relevant_lines:
+                return '\n'.join(relevant_lines)
+            
+        # 3. Fallback: return cleaned response if it looks like code
+        cleaned = response.strip()
+        if len(cleaned) > 10 and any(char in cleaned for char in ['|', '{', '(', 'where', 'select']):
+            return cleaned
+            
+        return ""
     
     def _extract_kustoql_from_response(self, response: str) -> str:
         """Extract KustoQL query from response."""
@@ -472,20 +568,39 @@ Generate the complete {format_name} query:"""
         return '\n'.join(kustoql_lines) if kustoql_lines else response.strip()
     
     def _calculate_confidence(self, response: str, converted_rule: str) -> float:
-        """Calculate confidence score for conversion."""
-        confidence = 0.6  # Base confidence
+        """Calculate confidence score for conversion based on rule quality indicators."""
+        if not converted_rule or not converted_rule.strip():
+            return 0.0
         
-        # Check for quality indicators
-        if len(converted_rule) > 50:
-            confidence += 0.1
+        confidence_factors = []
         
-        if any(keyword in response.lower() for keyword in ['where', 'select', 'from', '|']):
-            confidence += 0.2
+        # Content quality factors
+        rule_length = len(converted_rule.strip())
+        if rule_length > 20:  # Has meaningful content
+            confidence_factors.append(0.3)
         
-        if "error" not in response.lower() and "failed" not in response.lower():
-            confidence += 0.1
+        # Syntax quality factors based on target format patterns
+        response_lower = response.lower()
+        rule_lower = converted_rule.lower()
         
-        return min(confidence, 1.0)
+        # Query language indicators
+        query_indicators = ['where', 'select', 'from', '|', 'project', 'summarize', 'join']
+        syntax_score = sum(1 for indicator in query_indicators if indicator in rule_lower)
+        if syntax_score > 0:
+            confidence_factors.append(min(syntax_score * 0.1, 0.4))  # Cap at 0.4
+        
+        # Structure quality
+        if any(structure in rule_lower for structure in ['|', 'where', 'select']):
+            confidence_factors.append(0.2)
+        
+        # No error indicators
+        error_terms = ['error', 'failed', 'invalid', 'cannot', 'unable']
+        if not any(term in response_lower for term in error_terms):
+            confidence_factors.append(0.1)
+        
+        # Calculate final confidence
+        total_confidence = sum(confidence_factors)
+        return min(total_confidence, 1.0)
     
     def _calculate_kustoql_confidence(self, kustoql_query: str) -> float:
         """Calculate confidence score for KustoQL conversion."""

@@ -28,9 +28,10 @@ class EnhancedLLMService:
         source_rule: str,
         source_format: str,
         target_format: str,
+        context: Optional[Dict[str, Any]] = None,
         max_retries: int = 2
     ) -> Dict[str, Any]:
-        """Convert a rule with retry logic."""
+        """Convert a rule with retry logic and enhanced context."""
         await self.initialize()
         
         for attempt in range(max_retries + 1):
@@ -39,28 +40,31 @@ class EnhancedLLMService:
                 source_fmt = SourceFormat(source_format) if source_format != "sigma" else SourceFormat.SIGMA
                 target_fmt = TargetFormat(target_format)
                 
-                # Use unified conversion methods - no hardcoded format-specific paths
+                # Use unified conversion methods with context support
                 if source_fmt == SourceFormat.SIGMA:
                     result = await self.llm_service.convert_sigma_rule(
                         sigma_rule=source_rule,
-                        target_format=target_fmt
+                        target_format=target_fmt,
+                        context=context
                     )
                 elif source_fmt == SourceFormat.QRADAR:
                     result = await self.llm_service.convert_qradar_rule(
                         qradar_rule=source_rule,
-                        target_format=target_fmt  # Support ANY target format
+                        target_format=target_fmt,
+                        context=context
                     )
                 else:
                     # For other formats, use sigma conversion as fallback
                     result = await self.llm_service.convert_sigma_rule(
                         sigma_rule=source_rule,
-                        target_format=target_fmt
+                        target_format=target_fmt,
+                        context=context
                     )
                 
                 return {
                     "success": True,
-                    "target_rule": result.get("converted_rule", ""),
-                    "confidence": result.get("confidence", 0.8),
+                    "target_rule": result.get("target_rule", ""),
+                    "confidence_score": result.get("confidence_score", 0.0),  # Use consistent field name
                     "metadata": result.get("metadata", {})
                 }
                 
@@ -71,7 +75,7 @@ class EnhancedLLMService:
                         "success": False,
                         "error": str(e),
                         "target_rule": "",
-                        "confidence": 0.0
+                        "confidence_score": 0.0  # Use consistent field name
                     }
                 await asyncio.sleep(1)  # Brief delay before retry
         
@@ -79,7 +83,7 @@ class EnhancedLLMService:
             "success": False,
             "error": "Max retries exceeded",
             "target_rule": "",
-            "confidence": 0.0
+            "confidence_score": 0.0  # Use consistent field name
         }
     
     async def validate_kusto_query(self, query: str) -> Dict[str, Any]:
