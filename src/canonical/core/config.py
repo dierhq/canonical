@@ -48,15 +48,23 @@ class Settings(BaseSettings):
     qradar_docs_collection: str = Field(default="qradar_docs", env="QRADAR_DOCS_COLLECTION")
     
     # Embedding model settings
-    embedding_model: str = Field(default="BAAI/bge-large-en-v1.5", env="EMBEDDING_MODEL")
-    embedding_device: str = Field(default="cpu", env="EMBEDDING_DEVICE")
-    embedding_batch_size: int = Field(default=32, env="EMBEDDING_BATCH_SIZE")
+    embedding_model: str = Field(default="text-embedding-3-large", env="EMBEDDING_MODEL")
     
-    # Foundation-Sec-8B LLM settings
-    llm_model: str = Field(default="fdtn-ai/Foundation-Sec-8B", env="LLM_MODEL")
-    llm_device: str = Field(default="auto", env="LLM_DEVICE")
+    # LLM Provider settings (replaces Foundation-Sec-8B)
+    llm_provider: str = Field(default="openai", env="LLM_PROVIDER")  # openai, azure, local
+    llm_model: str = Field(default="gpt-4o", env="LLM_MODEL")
     llm_max_tokens: int = Field(default=4096, env="LLM_MAX_TOKENS")
     llm_temperature: float = Field(default=0.1, env="LLM_TEMPERATURE")
+    
+    # OpenAI settings
+    openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
+    openai_base_url: str = Field(default="https://api.openai.com/v1", env="OPENAI_BASE_URL")
+    
+    # Azure OpenAI settings
+    azure_openai_endpoint: str = Field(default="", env="AZURE_OPENAI_ENDPOINT")
+    azure_openai_key: str = Field(default="", env="AZURE_OPENAI_KEY")
+    azure_openai_version: str = Field(default="2024-10-21", env="AZURE_OPENAI_VERSION")
+    azure_openai_deployment: str = Field(default="gpt-4o", env="AZURE_OPENAI_DEPLOYMENT")
     
     # Data sources
     sigma_repo_url: str = Field(

@@ -15,8 +15,7 @@ setup(
         "langgraph>=0.0.55",
         "chromadb>=0.4.18",
         "sentence-transformers>=2.2.2",
-        "transformers>=4.35.0",
-        "torch>=2.1.0",
+        "openai>=1.12.0",
         "pyyaml>=6.0.1",
         "ruamel.yaml>=0.17.32",
         "pandas>=2.1.0",
@@ -33,8 +32,7 @@ setup(
         "click>=8.1.0",
         "rank-bm25>=0.2.2",
         "pymupdf>=1.23.0",
-        "mistralai>=0.1.0",
-        "accelerate>=0.21.0",
+        "jsonschema>=4.17.0",
     ],
     extras_require={
         "dev": [
@@ -72,5 +70,5 @@ setup(
         "Topic :: Security",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
-    keywords=["siem", "sigma", "security", "rule-conversion", "foundation-sec-8b", "chromadb"],
+    keywords=["siem", "sigma", "security", "rule-conversion", "gpt-4o", "chromadb"],
 ) 

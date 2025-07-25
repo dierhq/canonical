@@ -36,9 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Sigma → Splunk SPL (Splunk Enterprise Security)
   - Sigma → QRadar AQL (IBM QRadar)
 
-- **Foundation-Sec-8B Intelligence**
+- **GPT-4o Intelligence**
   - Context-aware conversions using BGE-large-en-v1.5 embeddings
-  - Foundation-Sec-8B language model for cybersecurity-optimized rule generation
+  - GPT-4o language model for advanced rule generation
   - Confidence scoring for conversion quality assessment
   - Vector similarity search across knowledge base
 
@@ -79,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Technical Implementation
 - **Vector Database**: ChromaDB for semantic search and storage
 - **Embeddings**: BGE-large-en-v1.5 for text vectorization
-- **Language Model**: Foundation-Sec-8B for cybersecurity-specialized rule generation
+- **Language Model**: GPT-4o for advanced rule generation
 - **Web Framework**: FastAPI for API development
 - **CLI Framework**: Click for command-line interface
 - **Configuration**: Pydantic for settings management

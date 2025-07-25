@@ -2,17 +2,9 @@
 langgraph>=0.0.55
 chromadb>=0.4.18
 sentence-transformers>=2.2.2
-transformers>=4.35.0
-torch>=2.1.0
 
-# Foundation-Sec-8B model dependencies (Llama-based)
-accelerate>=0.21.0
-bitsandbytes>=0.41.0
-safetensors>=0.3.0
-
-# Qwen model dependencies (legacy fallback)
-qwen-agent>=0.0.3
-modelscope>=1.9.0
+# OpenAI and Azure OpenAI integration
+openai>=1.12.0
 
 # YAML and rule parsing
 pyyaml>=6.0.1
@@ -46,14 +38,10 @@ rank-bm25>=0.2.2
 # PDF processing (for Azure Sentinel docs)
 pymupdf>=1.23.0
 
-# Optional: Mistral AI client (for enhanced processing)
-mistralai>=0.1.0
-
 # Optional: Jupyter for experimentation
 jupyter>=1.0.0
 matplotlib>=3.7.0
 seaborn>=0.12.0
 
-# Performance optimization for Foundation-Sec-8B
-optimum>=1.14.0
-# flash-attn>=2.0.0; platform_machine == "x86_64"  # Removed due to compilation issues 
+# JSON schema validation for structured outputs
+jsonschema>=4.17.0 

@@ -19,7 +19,7 @@ from chromadb.config import Settings as ChromaSettings
 from loguru import logger
 
 from ..core.config import settings
-from ..services.embedding import embedding_service
+from ..services.embedding import get_embedding_service
 
 
 class ChromaDBService:
@@ -49,7 +49,7 @@ class ChromaDBService:
             )
             
             # Initialize embedding service
-            await embedding_service.initialize()
+            await get_embedding_service().initialize()
             
             # Create or get collections
             await self._setup_collections()
@@ -133,7 +133,7 @@ class ChromaDBService:
         try:
             # Generate embeddings
             logger.info(f"Generating embeddings for {len(documents)} documents")
-            embeddings = await embedding_service.embed_texts(documents)
+            embeddings = await get_embedding_service().embed_texts(documents)
             
             # Generate IDs if not provided
             if ids is None:
@@ -179,7 +179,7 @@ class ChromaDBService:
         
         try:
             # Generate query embedding
-            query_embedding = await embedding_service.embed_text(query)
+            query_embedding = await get_embedding_service().embed_text(query)
             
             # Search collection
             collection = self.collections[collection_name]
@@ -354,7 +354,7 @@ class ChromaDBService:
                 collection = self.client.get_collection(collection_name)
             
             # Generate embedding using our embedding service
-            query_embedding = await embedding_service.embed_text(query_text)
+            query_embedding = await get_embedding_service().embed_text(query_text)
             
             # Query the collection with embedding
             results = collection.query(
@@ -392,7 +392,7 @@ class ChromaDBService:
         
         try:
             # Generate embedding for updated document
-            embedding = await embedding_service.embed_text(document)
+            embedding = await get_embedding_service().embed_text(document)
             
             # Update document
             collection = self.collections[collection_name]

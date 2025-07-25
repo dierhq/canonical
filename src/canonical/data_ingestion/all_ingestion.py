@@ -71,7 +71,7 @@ async def ingest_all_data(force_refresh: bool = False) -> Dict[str, Any]:
         
         # Ingest QRadar Documentation
         logger.info("Starting QRadar documentation ingestion...")
-        qradar_docs_stats = await qradar_docs_ingestion.ingest_qradar_docs(force_refresh)
+        qradar_docs_stats = await qradar_docs_ingestion.ingest_qradar_blog_docs(force_refresh)
         results["qradar_docs"] = qradar_docs_stats
         
         logger.info("All data ingestion completed successfully")

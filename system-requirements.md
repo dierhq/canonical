@@ -4,7 +4,7 @@
 
 ### Minimum Requirements
 - **CPU**: 4 cores (2.0+ GHz)
-- **RAM**: 32 GB (for Foundation-Sec-8B)
+- **RAM**: 8 GB (for local processing)
 - **Storage**: 15 GB free space
 - **OS**: Linux, macOS, or Windows with Python 3.9+
 
@@ -26,9 +26,9 @@
 |-----------|------|-------------|
 | **Source Repositories** | 885 MB | Sigma rules, MITRE CAR, Atomic Red Team repositories |
 | **ChromaDB Vector Database** | 227 MB | Embeddings for 6,891 documents, metadata and indices |
-| **Foundation-Sec-8B Model** | ~10 GB | Cybersecurity-specialized language model |
+| **OpenAI API Access** | 0 GB | Cloud-based GPT-4o processing |
 | **Cache Files** | 34 MB | MITRE ATT&CK JSON data, temporary processing files |
-| **Total Data** | **~11 GB** | Complete dataset after ingestion |
+| **Total Data** | **~1 GB** | Complete dataset after ingestion |
 
 ### Data Collections
 - **Sigma Rules**: 3,015 documents
@@ -43,10 +43,10 @@
 - **Runtime Memory**: ~2-3 GB
 - **Batch Processing**: +1-2 GB during ingestion
 
-### Language Model (Foundation-Sec-8B)
-- **Model Size**: ~10 GB
-- **Runtime Memory**: ~16-24 GB (with quantization)
-- **Inference Memory**: +4-6 GB per request
+### Language Model (GPT-4o via API)
+- **Model Size**: 0 GB (cloud-based)
+- **Runtime Memory**: ~100 MB (API client)
+- **Request Processing**: Minimal local memory usage
 
 ### ChromaDB
 - **Base Memory**: ~500 MB
@@ -260,7 +260,7 @@ ls -la ~/.cache/huggingface/
 rm -rf ~/.cache/huggingface/transformers/
 
 # Verify model download
-python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('fdtn-ai/Foundation-Sec-8B')"
+python -c "import openai; print('OpenAI library available')"
 ```
 
 ## 📞 Support
@@ -272,4 +272,4 @@ For performance and scaling questions:
 
 ---
 
-**Hardware recommendations based on Foundation-Sec-8B requirements and production workloads.** 
+**Hardware recommendations based on GPT-4o API usage and production workloads.** 

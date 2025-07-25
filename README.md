@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/Python-3.9+-green?style=for-the-badge)
 ![Local LLM](https://img.shields.io/badge/Local-LLM-purple?style=for-the-badge)
 
-**An intelligent SIEM rule converter that transforms security detection rules between different formats using Foundation-Sec-8B and contextual intelligence.**
+**An intelligent SIEM rule converter that transforms security detection rules between different formats using GPT-4o and contextual intelligence.**
 
 [Features](#-features) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [License](#-license)
 
@@ -15,28 +15,27 @@
 
 ---
 
-## 🆕 **Foundation-Sec-8B Integration**
+## 🆕 **GPT-4o Integration**
 
-**SPECIALIZED MODEL**: Canonical uses **Foundation-Sec-8B by Cisco** as the cybersecurity-optimized LLM for superior performance!
+**ADVANCED MODEL**: Canonical uses **GPT-4o by OpenAI** as the advanced language model for superior performance!
 
-### 🚀 **Why Foundation-Sec-8B?**
-- **🎯 Purpose-Built**: Specialized for cybersecurity (trained on 5.1B tokens of security data)
-- **📈 Better Performance**: 5-13% improvement on cybersecurity benchmarks vs general models
-- **🛡️ Domain Expertise**: Deep knowledge of CVEs, CWEs, MITRE ATT&CK, threat intelligence
-- **🔧 SIEM Optimized**: Enhanced rule conversion accuracy for all supported formats
-- **🏢 Enterprise Ready**: Apache 2.0 license, local deployment, air-gapped compatible
+### 🚀 **Why GPT-4o?**
+- **🎯 State-of-the-Art**: Latest OpenAI model with advanced reasoning capabilities
+- **📈 Superior Performance**: Industry-leading language understanding and generation
+- **🛡️ Versatile Expertise**: Excellent performance across security and technical domains
+- **🔧 SIEM Optimized**: Enhanced rule conversion accuracy through advanced prompting
+- **🏢 Enterprise Ready**: API-based access, scalable, and reliable
 
 ### 💾 **System Requirements**
-- **Memory**: 32GB+ RAM for optimal performance
-- **GPU**: 16GB+ VRAM recommended (RTX A6000, V100, A100)
-- **Storage**: Additional 10GB for Foundation-Sec-8B model
-- **Auto-Quantization**: 4-bit quantization on systems with <24GB VRAM
+- **Memory**: 8GB+ RAM for optimal performance
+- **Network**: Stable internet connection for API access
+- **API Key**: Valid OpenAI API key required
 
 ---
 
 ## 🎯 Overview
 
-Canonical is an advanced SIEM rule converter designed specifically for **Security Operations Centers (SOCs)**, **Managed Detection and Response (MDR)** services, and **enterprise cybersecurity teams**. It leverages Foundation-Sec-8B and on-premises intelligence to provide context-aware, intelligent rule conversions with high accuracy and comprehensive security intelligence - perfect for air-gapped and secure environments.
+Canonical is an advanced SIEM rule converter designed specifically for **Security Operations Centers (SOCs)**, **Managed Detection and Response (MDR)** services, and **enterprise cybersecurity teams**. It leverages GPT-4o and comprehensive intelligence to provide context-aware, intelligent rule conversions with high accuracy and comprehensive security intelligence.
 
 ### 🏢 Target Audience
 - **Security Operations Centers (SOCs)**
@@ -64,14 +63,14 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 
 **Total**: **12 conversion paths** across **3 source formats** and **6 target formats**
 
-### 🧠 **Foundation-Sec-8B Intelligence**
-- **Cybersecurity-Specialized Processing**: Foundation-Sec-8B LLM with deep security domain knowledge
+### 🧠 **GPT-4o Intelligence**
+- **Advanced Language Processing**: GPT-4o with superior reasoning and understanding capabilities
 - **Context-Aware Conversions**: Uses vector similarity search across 35,000+ security documents
 - **Enhanced Azure Sentinel Context**: 25,000+ documentation chunks for superior KustoQL conversions
 - **MITRE ATT&CK Integration**: Automatic technique mapping and enrichment
 - **Confidence Scoring**: AI-generated confidence levels for each conversion (85-95%+)
-- **Semantic Understanding**: Advanced language models for accurate translations
-- **Air-Gapped Compatible**: Fully self-contained with local embeddings (BGE-large-en-v1.5)
+- **Semantic Understanding**: State-of-the-art language model for accurate translations
+- **API-Based Processing**: Reliable cloud-based processing with OpenAI's infrastructure
 
 ### 📊 **Comprehensive Knowledge Base**
 - **3,015 Sigma Rules** from SigmaHQ repository
@@ -104,7 +103,7 @@ Canonical is an advanced SIEM rule converter designed specifically for **Securit
 
 ### Prerequisites
 - Python 3.9+
-- 32+ GB RAM (for Foundation-Sec-8B)
+- 8+ GB RAM (for local processing)
 - 10+ GB storage space
 - Git
 
@@ -192,7 +191,7 @@ print(result["target_rule"])
 
 ### 🏗️ Technical Documentation
 - [Architecture Overview](docs/architecture.md) - System design and components
-- [Foundation-Sec-8B Integration](docs/foundation-sec-8b.md) - LLM configuration and optimization
+- [GPT-4o Integration](docs/gpt-4o-integration.md) - LLM configuration and optimization
 - [Data Sources](docs/data-sources.md) - Knowledge base and ingestion
 - [Development Guide](docs/development.md) - Contributing and extending
 - [Performance Tuning](docs/performance.md) - Optimization techniques
@@ -209,7 +208,7 @@ print(result["target_rule"])
 graph TB
     A[CLI Interface] --> B[Core Converter]
     C[REST API] --> B
-    B --> D[Foundation-Sec-8B]
+    B --> D[GPT-4o]
     B --> E[Embedding Service]
     B --> F[ChromaDB]
     B --> N[QRadar Parser]
@@ -225,7 +224,7 @@ graph TB
     F --> S[Azure Sentinel<br/>Documentation<br/>25,000+ chunks]
     F --> R[QRadar Rules<br/>Collection]
     
-    D --> K[Foundation-Sec-8B<br/>Local Processing]
+    D --> K[GPT-4o<br/>OpenAI API]
     E --> L[BGE-large-en-v1.5<br/>Local Embeddings]
     
     style K fill:#e8f5e8
@@ -241,7 +240,7 @@ graph TB
 - **Sigma Rules**: 2-5 seconds per rule (CPU only)
 - **QRadar Rules**: 5-15 seconds per rule (includes context gathering)
 - **Batch Processing**: 50-200 rules/minute
-- **Foundation-Sec-8B Processing**: No external API latency
+- **GPT-4o Processing**: Fast API-based processing
 
 ### Accuracy Metrics
 - **Conversion Success Rate**: >95% for Sigma, >90% for QRadar
@@ -250,7 +249,7 @@ graph TB
 - **Field Mapping Accuracy**: >95% for common fields
 
 ### Resource Requirements
-- **RAM**: 32GB minimum for Foundation-Sec-8B, 16GB for basic operation
+- **RAM**: 8GB minimum for local processing, 16GB for optimal performance
 - **Storage**: 15GB for complete dataset and models
 - **GPU**: Optional but recommended (16GB+ VRAM)
 - **CPU**: 8+ cores recommended for production
@@ -291,7 +290,7 @@ For licensing inquiries and commercial use cases:
 - **IBM**: QRadar rule format specifications
 
 ### Technology Stack
-- **Foundation-Sec-8B**: Cybersecurity-specialized language model by Cisco
+- **OpenAI**: GPT-4o language model and API infrastructure
 - **BGE**: Text embedding model by BAAI
 - **ChromaDB**: Vector database for semantic search
 - **FastAPI**: Modern web framework for APIs

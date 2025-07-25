@@ -2,20 +2,20 @@
 
 This guide provides detailed instructions for deploying Canonical in various environments, from development to enterprise production.
 
-## 🆕 Foundation-Sec-8B Integration
+## 🆕 GPT-4o Integration
 
-**IMPORTANT**: Canonical now uses Foundation-Sec-8B by Cisco as the cybersecurity-specialized LLM for enhanced security performance. This model provides:
+**IMPORTANT**: Canonical now uses GPT-4o by OpenAI as the advanced language model for enhanced performance. This model provides:
 
-- **5-13% better performance** on cybersecurity benchmarks
-- **Deep domain knowledge** of CVEs, CWEs, MITRE ATT&CK
+- **State-of-the-art performance** on language understanding and generation
+- **Advanced reasoning capabilities** for complex rule conversions
 - **Superior rule conversion accuracy** for SIEM platforms
-- **Specialized cybersecurity training** on 5.1B tokens of security data
+- **Reliable API-based processing** with enterprise-grade infrastructure
 
-### System Requirements for Foundation-Sec-8B
-- **Memory**: 32GB+ RAM recommended for optimal performance
-- **GPU**: 16GB+ VRAM recommended (RTX A6000, V100, A100)
-- **Storage**: Additional 10GB for model weights
-- **Quantization**: Automatic 4-bit quantization on systems with <24GB VRAM
+### System Requirements for GPT-4o
+- **Memory**: 8GB+ RAM recommended for optimal performance
+- **Network**: Stable internet connection for API access
+- **API Key**: Valid OpenAI API key required
+- **Storage**: Reduced storage requirements (no local model needed)
 
 ## 🚀 Quick Start Deployment
 
@@ -57,9 +57,9 @@ curl http://localhost:8000/health
 ### Prerequisites
 - **OS**: Ubuntu 20.04+ / CentOS 8+ / RHEL 8+
 - **Python**: 3.9+
-- **Memory**: 32+ GB RAM (for Foundation-Sec-8B)
-- **GPU Memory**: 16+ GB VRAM recommended (RTX A6000, V100, A100)
-- **Storage**: 60+ GB SSD (additional space for Foundation-Sec-8B model)
+- **Memory**: 8+ GB RAM (for local processing)
+- **Network**: Stable internet connection for API access
+- **Storage**: 20+ GB SSD (no large model storage needed)
 - **Network**: Firewall configured for API access
 
 ### 1. System Preparation
@@ -131,9 +131,9 @@ API_PORT=8000
 DEBUG=false
 LOG_LEVEL=INFO
 
-# Model settings (Foundation-Sec-8B)
+# Model settings (GPT-4o)
 EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
-LLM_MODEL=fdtn-ai/Foundation-Sec-8B
+LLM_MODEL=gpt-4o
 EMBEDDING_DEVICE=cpu
 LLM_DEVICE=auto
 
@@ -375,7 +375,7 @@ spec:
 | `DEBUG` | Debug mode | `false` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `EMBEDDING_MODEL` | Embedding model | `BAAI/bge-large-en-v1.5` |
-| `LLM_MODEL` | Language model | `fdtn-ai/Foundation-Sec-8B` |
+| `LLM_MODEL` | Language model | `gpt-4o` |
 | `CHROMADB_PATH` | ChromaDB path | `./data/chromadb` |
 
 ### Security Configuration

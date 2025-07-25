@@ -21,9 +21,9 @@ from loguru import logger
 from ..core.models import ConversionRequest, ConversionResponse, TargetFormat
 from ..core.rule_enhancer import universal_enhancer
 from ..parsers.sigma import sigma_parser
-from ..services.embedding import embedding_service
+from ..services.embedding import get_embedding_service
 from ..services.chromadb import chromadb_service
-from ..services.llm import llm_service
+from ..services.llm import get_llm_service
 from ..services.enhanced_llm import enhanced_llm_service
 from ..services.hybrid_retrieval import hybrid_retrieval_service
 
@@ -48,6 +48,7 @@ class ConversionWorkflow:
         """Initialize the conversion workflow."""
         self.workflow = None
         self.memory = MemorySaver()
+        self.chromadb_service = chromadb_service
         self._setup_workflow()
     
     def _setup_workflow(self) -> None:
@@ -275,17 +276,17 @@ class ConversionWorkflow:
                 logger.warning(f"ChromaDB search failed: {e}")
                 similar_rules = []
             
-            # INTELLIGENT FALLBACK: Use Foundation-Sec-8B's knowledge when ChromaDB is insufficient
+            # INTELLIGENT FALLBACK: Use GPT-4o's knowledge when ChromaDB is insufficient
             if len(similar_rules) < search_params["minimum_results_threshold"]:
-                logger.info("ChromaDB returned insufficient results, using Foundation-Sec-8B knowledge")
+                logger.info("ChromaDB returned insufficient results, using GPT-4o knowledge")
                 try:
-                    sec8b_context = await self._get_foundation_sec8b_context(state, rule_summary)
-                    if sec8b_context:
-                        # Add Foundation-Sec-8B knowledge as synthetic "similar rules"
-                        similar_rules.extend(sec8b_context)
-                        logger.info(f"Added {len(sec8b_context)} items from Foundation-Sec-8B knowledge")
+                    gpt4o_context = await self._get_gpt4o_context(state, rule_summary)
+                    if gpt4o_context:
+                        # Add GPT-4o knowledge as synthetic "similar rules"
+                        similar_rules.extend(gpt4o_context)
+                        logger.info(f"Added {len(gpt4o_context)} items from GPT-4o knowledge")
                 except Exception as e:
-                    logger.warning(f"Foundation-Sec-8B fallback failed: {e}")
+                    logger.warning(f"GPT-4o fallback failed: {e}")
             
             state["similar_rules"] = similar_rules
             logger.info(f"Total context items: {len(similar_rules)}")
@@ -298,11 +299,11 @@ class ConversionWorkflow:
         return state
     
     async def _determine_search_parameters(self, state: ConversionState, rule_summary: str) -> Dict[str, int]:
-        """Dynamically determine search parameters using Foundation-Sec-8B's intelligence."""
+        """Dynamically determine search parameters using GPT-4o's intelligence."""
         try:
             request = state["request"]
             
-            # Ask Foundation-Sec-8B to determine optimal search parameters
+            # Ask GPT-4o to determine optimal search parameters
             params_prompt = f"""As a cybersecurity expert, determine optimal search parameters for finding similar rules and context:
 
 RULE TYPE: {request.source_format.value} to {request.target_format.value}
@@ -323,7 +324,7 @@ Consider:
 Respond with only numbers separated by commas:
 initial_search,min_threshold,fallback_search,max_context,doc_id_length"""
 
-            response = await llm_service.generate_response(params_prompt, max_tokens=100, use_cybersec_optimization=True)
+            response = await get_llm_service().generate_response(params_prompt, max_tokens=100, use_cybersec_optimization=True)
             
             # Parse the response
             try:
@@ -337,7 +338,7 @@ initial_search,min_threshold,fallback_search,max_context,doc_id_length"""
                         "doc_id_length": max(50, min(200, numbers[4]))
                     }
             except (ValueError, IndexError):
-                logger.warning("Failed to parse search parameters from Foundation-Sec-8B, using intelligent defaults")
+                logger.warning("Failed to parse search parameters from GPT-4o, using intelligent defaults")
             
             # Intelligent fallback based on complexity analysis
             complexity_keywords = ["complex", "advanced", "correlation", "behavioral", "anomaly"]
@@ -371,12 +372,12 @@ initial_search,min_threshold,fallback_search,max_context,doc_id_length"""
                 "doc_id_length": 120
             }
     
-    async def _get_foundation_sec8b_context(self, state: ConversionState, rule_summary: str) -> List[Dict[str, Any]]:
-        """Get context from Foundation-Sec-8B's cybersecurity knowledge when ChromaDB is insufficient."""
+    async def _get_gpt4o_context(self, state: ConversionState, rule_summary: str) -> List[Dict[str, Any]]:
+        """Get context from GPT-4o's cybersecurity knowledge when ChromaDB is insufficient."""
         try:
             request = state["request"]
             
-            # Create a prompt to get Foundation-Sec-8B's knowledge about similar rules and patterns
+            # Create a prompt to get GPT-4o's knowledge about similar rules and patterns
             knowledge_prompt = f"""As a cybersecurity expert with deep knowledge of SIEM rules and threat detection, provide context for converting this security rule:
 
 SOURCE FORMAT: {request.source_format.value}
@@ -398,8 +399,8 @@ Provide relevant examples with explanations:"""
             search_params = await self._determine_search_parameters(state, rule_summary)
             max_knowledge_items = min(search_params["max_context_items"], 8)  # Cap knowledge items
             
-            # Get Foundation-Sec-8B's knowledge
-            response = await llm_service.generate_response(knowledge_prompt, max_tokens=1500, use_cybersec_optimization=True)
+            # Get GPT-4o's knowledge
+            response = await get_llm_service().generate_response(knowledge_prompt, max_tokens=1500, use_cybersec_optimization=True)
             
             # Parse response into structured context items
             context_items = []
@@ -428,7 +429,7 @@ Provide relevant examples with explanations:"""
             return context_items
             
         except Exception as e:
-            logger.error(f"Failed to get Foundation-Sec-8B context: {e}")
+            logger.error(f"Failed to get GPT-4o context: {e}")
             return []
     
     async def _gather_context_node(self, state: ConversionState) -> ConversionState:
@@ -620,7 +621,7 @@ Provide relevant examples with explanations:"""
         return None
     
     def _generate_conversion_hint(self, field_name: str, pattern: str, pattern_analysis: Dict[str, Any]) -> Optional[str]:
-        """Generate conversion hints for Foundation-Sec-8B based on pattern analysis."""
+        """Generate conversion hints for GPT-4o based on pattern analysis."""
         pattern_type = pattern_analysis.get('pattern_type', 'unknown')
         suggested_approach = pattern_analysis.get('suggested_kusto_approach', 'regex_match')
         semantic_meaning = pattern_analysis.get('semantic_meaning', '')
@@ -894,8 +895,8 @@ Provide relevant examples with explanations:"""
             
             request = state["request"]
             
-            # Use enhanced LLM service for ALL conversions (ChromaDB + Foundation-Sec-8B)
-            logger.info("Using enhanced LLM service with ChromaDB + Foundation-Sec-8B")
+            # Use enhanced LLM service for ALL conversions (ChromaDB + GPT-4o)
+            logger.info("Using enhanced LLM service with ChromaDB + GPT-4o")
             # Use enhanced LLM service with retry logic and enhanced rule
             conversion_result = await enhanced_llm_service.convert_with_retry(
                 source_rule=state["enhanced_rule"],  # Use enhanced rule
@@ -922,18 +923,18 @@ Provide relevant examples with explanations:"""
                     "context_data": state.get("context_data", {})
                 }
                 
-                # Use Foundation-Sec-8B for ALL conversions - no specialized converters
+                # Use GPT-4o for ALL conversions - no specialized converters
                 if request.source_format.value == "qradar":
-                    # Use Foundation-Sec-8B for QRadar conversion with enhanced rule
+                    # Use GPT-4o for QRadar conversion with enhanced rule
                     enhanced_rule = state.get("enhanced_rule", request.source_rule)
-                    conversion_result = await llm_service.convert_qradar_rule(
+                    conversion_result = await get_llm_service().convert_qradar_rule(
                         qradar_rule=enhanced_rule,
                         target_format=request.target_format,
                         context=context
                     )
                 else:
-                    # Use Foundation-Sec-8B for other formats
-                    conversion_result = await llm_service.convert_sigma_rule(
+                    # Use GPT-4o for other formats
+                    conversion_result = await get_llm_service().convert_sigma_rule(
                         sigma_rule=request.source_rule,
                         target_format=request.target_format,
                         context=context
@@ -975,7 +976,7 @@ Provide relevant examples with explanations:"""
                 conversion_result["success"] = False
                 conversion_result["error_message"] = "No target rule generated"
             
-            # 2. Dynamic confidence score validation using Foundation-Sec-8B
+            # 2. Dynamic confidence score validation using GPT-4o
             confidence = conversion_result.get("confidence_score", 0.0)
             dynamic_threshold = await self._determine_confidence_threshold(state, conversion_result)
             if confidence < dynamic_threshold:
@@ -1302,12 +1303,10 @@ Provide relevant examples with explanations:"""
         try:
             logger.info("Initializing conversion services")
             
-            # Initialize services
-            await embedding_service.initialize()
+            # Initialize services (only those that need async initialization)
+            await get_embedding_service().initialize()
             await chromadb_service.initialize()
-            await llm_service.initialize()
-            await enhanced_llm_service.initialize()
-            await hybrid_retrieval_service.initialize()
+            # Other services initialize automatically in constructor
             
             logger.info("All conversion services initialized successfully")
         except Exception as e:

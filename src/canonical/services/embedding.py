@@ -9,76 +9,90 @@ For licensing inquiries, contact: licensing@dier.org
 """
 
 """
-BGE embedding service for text vectorization.
+OpenAI embedding service for text vectorization using text-embedding-3-large.
 """
 
 import asyncio
-from typing import List, Union, Optional
+from typing import List, Optional
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from loguru import logger
 
 from ..core.config import settings
 
 
 class EmbeddingService:
-    """BGE embedding service for text vectorization."""
+    """OpenAI embedding service using text-embedding-3-large."""
     
-    def __init__(self, model_name: Optional[str] = None, device: Optional[str] = None):
-        """Initialize the embedding service.
+    def __init__(self, model_name: Optional[str] = None):
+        """Initialize the OpenAI embedding service.
         
         Args:
-            model_name: Name of the embedding model to use
-            device: Device to run the model on ('cpu', 'cuda', 'mps')
+            model_name: Name of the OpenAI embedding model to use
         """
         self.model_name = model_name or settings.embedding_model
-        self.device = device or settings.embedding_device
-        self.model = None
+        self.client = None
         self._initialized = False
-    
+        
+        # Ensure we're using an OpenAI embedding model
+        if not self.model_name.startswith('text-embedding-'):
+            logger.warning(f"Model {self.model_name} doesn't appear to be an OpenAI embedding model. Using text-embedding-3-large instead.")
+            self.model_name = "text-embedding-3-large"
+        
     async def initialize(self) -> None:
-        """Initialize the embedding model."""
+        """Initialize the OpenAI embedding client."""
         if self._initialized:
             return
             
         try:
-            logger.info(f"Loading embedding model: {self.model_name}")
-            self.model = SentenceTransformer(
-                self.model_name,
-                device=self.device
-            )
+            from openai import AsyncOpenAI
+            
+            # Check if we should use Azure OpenAI or standard OpenAI
+            if hasattr(settings, 'azure_openai_api_key') and settings.azure_openai_api_key:
+                logger.info(f"Loading Azure OpenAI embedding model: {self.model_name}")
+                # For Azure OpenAI, we need to use AsyncAzureOpenAI
+                from openai import AsyncAzureOpenAI
+                self.client = AsyncAzureOpenAI(
+                    api_key=settings.azure_openai_api_key,
+                    api_version=getattr(settings, 'azure_openai_api_version', '2024-06-01'),
+                    azure_endpoint=getattr(settings, 'azure_openai_endpoint', '')
+                )
+            else:
+                logger.info(f"Loading OpenAI embedding model: {self.model_name}")
+                # Create OpenAI client
+                self.client = AsyncOpenAI(
+                    api_key=getattr(settings, 'openai_api_key', '')
+                )
+            
             self._initialized = True
-            logger.info(f"Embedding model loaded successfully on {self.device}")
+            logger.info(f"OpenAI embedding model {self.model_name} loaded successfully")
         except Exception as e:
-            logger.error(f"Failed to load embedding model: {e}")
+            logger.error(f"Failed to initialize OpenAI embedding client: {e}")
             raise
-    
+
     async def embed_text(self, text: str) -> List[float]:
-        """Embed a single text string.
+        """Embed a single text string using OpenAI.
         
         Args:
             text: Text to embed
             
         Returns:
-            List of embedding values
+            List of embedding values (3072 dimensions for text-embedding-3-large)
         """
         if not self._initialized:
             await self.initialize()
             
         try:
-            # Run embedding in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            embedding = await loop.run_in_executor(
-                None,
-                lambda: self.model.encode(text, convert_to_tensor=False)
+            response = await self.client.embeddings.create(
+                model=self.model_name,
+                input=text
             )
-            return embedding.tolist()
+            return response.data[0].embedding
         except Exception as e:
-            logger.error(f"Failed to embed text: {e}")
+            logger.error(f"Failed to embed text with OpenAI: {e}")
             raise
-    
+
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
-        """Embed multiple text strings.
+        """Embed multiple text strings using OpenAI.
         
         Args:
             texts: List of texts to embed
@@ -90,25 +104,24 @@ class EmbeddingService:
             await self.initialize()
             
         try:
-            # Process in batches to manage memory
-            batch_size = settings.embedding_batch_size
+            # OpenAI has batch limits, so we process in chunks
+            batch_size = min(2048, len(texts))  # OpenAI's max batch size is 2048
             embeddings = []
             
             for i in range(0, len(texts), batch_size):
                 batch = texts[i:i + batch_size]
-                logger.debug(f"Processing embedding batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
+                logger.debug(f"Processing OpenAI embedding batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
                 
-                # Run embedding in thread pool to avoid blocking
-                loop = asyncio.get_event_loop()
-                batch_embeddings = await loop.run_in_executor(
-                    None,
-                    lambda: self.model.encode(batch, convert_to_tensor=False)
+                response = await self.client.embeddings.create(
+                    model=self.model_name,
+                    input=batch
                 )
-                embeddings.extend([emb.tolist() for emb in batch_embeddings])
+                batch_embeddings = [data.embedding for data in response.data]
+                embeddings.extend(batch_embeddings)
             
             return embeddings
         except Exception as e:
-            logger.error(f"Failed to embed texts: {e}")
+            logger.error(f"Failed to embed texts with OpenAI: {e}")
             raise
     
     async def compute_similarity(self, text1: str, text2: str) -> float:
@@ -163,12 +176,28 @@ class EmbeddingService:
         """Get the dimension of the embedding vectors.
         
         Returns:
-            Embedding dimension
+            Embedding dimension (3072 for text-embedding-3-large)
         """
         if not self._initialized:
             raise RuntimeError("Embedding service not initialized")
-        return self.model.get_sentence_embedding_dimension()
+        
+        # Return dimensions for OpenAI models
+        if 'text-embedding-3-large' in self.model_name:
+            return 3072  # text-embedding-3-large: 3072 dimensions
+        elif 'text-embedding-3-small' in self.model_name:
+            return 1536  # text-embedding-3-small: 1536 dimensions
+        elif 'text-embedding-ada-002' in self.model_name:
+            return 1536  # text-embedding-ada-002: 1536 dimensions
+        else:
+            return 3072  # Default to text-embedding-3-large
 
 
-# Global embedding service instance
-embedding_service = EmbeddingService() 
+# Global embedding service instance - lazy initialization
+embedding_service = None
+
+def get_embedding_service():
+    """Get the embedding service instance, initializing if needed."""
+    global embedding_service
+    if embedding_service is None:
+        embedding_service = EmbeddingService()
+    return embedding_service 
