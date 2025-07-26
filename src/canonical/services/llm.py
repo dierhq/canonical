@@ -212,23 +212,44 @@ class UnifiedLLMService:
 
     def _build_system_prompt(self, source_format: str, target_format: str) -> str:
         """Build system prompt for rule conversion."""
+        kusto_requirements = ""
+        if target_format.lower() == "kustoql":
+            kusto_requirements = """
+
+MANDATORY KUSTOQL REQUIREMENTS:
+- ALWAYS use double quotes (") for string literals, NEVER single quotes (')
+- Select appropriate Azure Sentinel tables based on data type:
+  * Network traffic → CommonSecurityLog (Protocol, SourceIP, DestinationIP, DestinationPort)
+  * DNS queries → DnsEvents (QueryName, ClientIP, QueryType)
+  * Windows security → SecurityEvent (EventID, Computer, Account, Process)
+  * Process events → SecurityEvent (Process, CommandLine, ParentProcess)
+  * Authentication → SecurityEvent (LogonType, Account, WorkstationName)
+- NEVER use SecurityEvent for network traffic detection
+- For event.category: network → Use CommonSecurityLog table
+- For network.transport:udp → Protocol == "UDP" (double quotes required)
+- For destination.port → DestinationPort field in CommonSecurityLog
+- Example: CommonSecurityLog | where Protocol == "UDP" and DestinationPort == 4500"""
+
         return f"""You are DIER Rule-Converter, a cybersecurity expert specializing in SIEM rule conversion.
 
 CRITICAL INSTRUCTIONS:
-1. ONLY use information provided in the <CONTEXT> section
-2. If context is insufficient, respond with confidence score < 0.5 and explanation
-3. Output MUST be valid JSON following the exact schema provided
-4. Focus on accurate field mappings and logical equivalence
+1. ANALYZE provided Azure Sentinel schema information carefully
+2. SELECT appropriate tables based on data type being detected
+3. USE ONLY verified field names from schema documentation
+4. APPLY proper string formatting for target platform
+5. Output MUST be valid JSON following the exact schema provided
+6. Focus on accurate field mappings and logical equivalence{kusto_requirements}
 
 EXPERTISE:
 - Deep knowledge of {source_format.upper()} and {target_format.upper()} formats
 - MITRE ATT&CK framework integration
-- Security detection logic patterns
-- Field mapping and data source optimization
+- Security detection logic patterns  
+- Azure Sentinel table schemas and field mappings
 
 CONVERSION PRINCIPLES:
 - Preserve detection logic and intent
-- Map fields accurately between data sources
+- Map fields accurately using schema knowledge
+- Select most appropriate data tables
 - Maintain time windows and thresholds
 - Include relevant MITRE techniques
 - Provide confidence assessment
@@ -243,6 +264,11 @@ You excel at converting between SIEM rule formats while maintaining security eff
         context: str
     ) -> str:
         """Build conversion prompt with source rule and context."""
+        # Add comprehensive schema knowledge for KustoQL conversions
+        schema_context = ""
+        if target_format.lower() == "kustoql":
+            schema_context = self._get_azure_sentinel_schema_context()
+        
         return f"""Convert this {source_format.upper()} rule to {target_format.upper()}:
 
 <SOURCE_RULE>
@@ -253,13 +279,34 @@ You excel at converting between SIEM rule formats while maintaining security eff
 {context}
 </CONTEXT>
 
-CONVERSION STEPS:
+{schema_context}
+
+PRODUCTION-READY QUERY REQUIREMENTS:
+- ALWAYS include time filtering for performance (e.g., TimeGenerated >= ago(1h))
+- Use case-insensitive operators (=~) for string comparisons when appropriate
+- Map ALL source rule conditions, not just primary ones
+- Include relevant output fields using project statement
+- Add defensive logic for data quality variations
+- Consider performance optimization in query structure
+- VALIDATE table existence and use only standard Azure Sentinel tables
+- Handle missing fields with calculated expressions or union projections
+- Use double quotes (") for ALL string literals, never single quotes (')
+
+CRITICAL CONVERSION REQUIREMENTS:
 1. Analyze the source rule structure and detection logic
-2. Identify key fields, operators, and conditions
-3. Map fields to target format data sources
-4. Construct equivalent query in target format
-5. Validate syntax and logical correctness
-6. Assess conversion confidence and completeness
+2. Identify key fields, operators, and conditions  
+3. Map fields to appropriate target format data sources using schema knowledge
+4. Use correct string literal format (double quotes for KustoQL, not single quotes)
+5. Select appropriate tables based on data type (network, security events, etc.)
+6. Construct equivalent query in target format with proper syntax
+7. Validate field names exist in target schema
+8. Assess conversion confidence and completeness
+
+QUALITY STANDARDS:
+- Use only verified field names from target schema
+- Apply consistent string formatting
+- Select most appropriate data tables for the detection
+- Maintain logical equivalence with source rule
 
 Provide the conversion following the required JSON schema exactly."""
 
@@ -341,6 +388,97 @@ Provide the conversion following the required JSON schema exactly."""
             base_schema["required"].append("kibana_query")
             
         return base_schema
+    
+    def _get_azure_sentinel_schema_context(self) -> str:
+        """Get Azure Sentinel schema context for better field mapping."""
+        return """
+<AZURE_SENTINEL_SCHEMA>
+CRITICAL: Use double quotes (") for all string literals, not single quotes (').
+
+PERFORMANCE REQUIREMENTS:
+- ALWAYS include: | where TimeGenerated >= ago(lookback_period)
+- Use case-insensitive operators: =~ instead of == for strings when appropriate
+- Include project statement to select relevant output fields
+- Consider data source variations and add defensive conditions
+
+COMMON DATA TABLES AND ECS MAPPINGS:
+1. CommonSecurityLog - Network security, firewall, proxy logs
+   ECS Mappings: event.category:network, event.dataset:*flow*, network.*
+   Fields: DeviceProduct, DeviceVendor, SourceIP, DestinationIP, SourcePort, DestinationPort
+          Protocol, Activity, DeviceAction, DeviceDirection, TimeGenerated
+
+2. SecurityEvent - Windows security events  
+   ECS Mappings: event.category:process/authentication, host.os.type:windows
+   Fields: EventID, Computer, Account, LogonType, Process, CommandLine, 
+          WorkstationName, IpAddress, TimeGenerated
+
+3. Syslog - Linux/Unix system logs
+   ECS Mappings: event.category:process/host, host.os.type:linux
+   Fields: Computer, Facility, SeverityLevel, SyslogMessage, ProcessName, 
+          HostIP, TimeGenerated
+
+4. DnsEvents - DNS query logs
+   ECS Mappings: event.category:network, network.protocol:dns, dns.*
+   Fields: Computer, QueryName, QueryType, ClientIP, ServerIP, Result, TimeGenerated
+
+5. AzureDiagnostics - Azure service logs
+   ECS Mappings: cloud.provider:azure, event.category:*
+   Fields: Category, OperationName, ResultType, ResourceId, Properties, TimeGenerated
+
+ECS TO AZURE SENTINEL FIELD MAPPINGS:
+- event.dataset: network_traffic.* → EventType/DeviceEventClassID (exact mapping)
+- event.dataset: zeek.* → EventType/DeviceEventClassID (exact mapping)  
+- event.dataset: *flow* → DeviceAction in ("flow", "network_flow") OR DeviceDirection
+- event.category: network → CommonSecurityLog, DnsEvents
+- event.category: process → SecurityEvent, Syslog  
+- event.category: authentication → SecurityEvent
+- event.type: connection/dns → EventType field mapping
+- network.transport: tcp/udp → Protocol field (use =~ for case-insensitive)
+- network.bytes → TotalBytes (calculate as BytesReceived + BytesSent)
+- destination.port → DestinationPort, sPort
+- source.ip → SourceIP, cIP, ClientIP
+- destination.ip → DestinationIP, sIP, ServerIP
+- process.name → Process, ProcessName
+- user.name → Account, User
+
+COMPLEX QUERY PATTERNS:
+- Multiple datasets/categories → Use union with projection for normalization
+- OR conditions across different data types → Single table with union pattern
+- Field calculations in projections → Define calculated fields in each union branch
+- Avoid joins when union can consolidate similar data sources
+
+STANDARD AZURE SENTINEL TABLES (VALIDATED):
+✅ VALID: CommonSecurityLog, SecurityEvent, Syslog, DnsEvents, AzureDiagnostics
+✅ VALID: NetworkAccessTraffic, W3CIISLog, VMConnection, Heartbeat
+❌ INVALID: NetworkConnections, NetworkTraffic, Network (non-standard)
+
+FIELD CALCULATION PATTERNS:
+- TotalBytes → BytesReceived + BytesSent (in CommonSecurityLog)
+- BytesTransferred → SentBytes + ReceivedBytes (alternative)
+- Duration → TimeGenerated - PreviousTimeGenerated
+- FullName → strcat(FirstName, " ", LastName)
+
+UNION WITH PROJECTION PATTERN (PREFERRED FOR MULTI-DATASET QUERIES):
+let network_traffic = 
+    union isfuzzy=true
+        (DnsEvents | project TimeGenerated, EventType="dns", EventCategory="network", 
+         DestinationPort=53, TotalBytes=tolong(0)),
+        (CommonSecurityLog | project TimeGenerated, EventType=DeviceEventClassID, 
+         EventCategory=DeviceEventCategory, DestinationPort, TotalBytes=BytesReceived + BytesSent);
+
+WHEN TO USE UNION VS JOIN:
+- Union: When consolidating similar data from different tables with shared conditions
+- Join: When correlating different event types with relationships
+- Rule: If query has multiple event.dataset or event.category values → Use union
+
+PRODUCTION QUERY STRUCTURE:
+let lookback = 1h;  // Define time window
+[VALIDATED_TABLE_NAME]  // Use only standard tables
+| where TimeGenerated >= ago(lookback)  // Performance filter
+| where [PRIMARY_CONDITIONS]  // Map all source conditions with proper field calculations
+| where [SECONDARY_CONDITIONS]  // Defensive/alternative conditions  
+| project TimeGenerated, [RELEVANT_FIELDS]  // Select output fields
+</AZURE_SENTINEL_SCHEMA>"""
 
     async def validate_syntax(self, query: str, format_type: str) -> Dict[str, Any]:
         """Validate syntax of a query in specific format.

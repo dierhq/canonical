@@ -1,0 +1,5 @@
+let network_traffic = union isfuzzy=true NetworkTraffic, CommonSecurityLog;
+network_traffic
+| where (EventType == 'network_traffic.dns' or (EventCategory in ('network', 'network_traffic') and DestinationPort == 53))
+| where (EventType == 'zeek.dns' or EventType == 'dns' or EventType == 'connection')
+| where TotalBytes > 60000

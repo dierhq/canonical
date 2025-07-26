@@ -641,7 +641,7 @@ def serve(host: str, port: int, reload: bool):
     import uvicorn
     
     uvicorn.run(
-        "canonical.api.main:app",
+        "src.canonical.api.main:app",
         host=host,
         port=port,
         reload=reload,

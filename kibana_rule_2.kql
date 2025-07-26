@@ -1,0 +1,1 @@
+NetworkConnections | where Action == 'network_flow' and DestinationPort in (21, 22, 23, 25, 139, 445, 3389, 5985, 5986) and ipv4_is_private(SourceIP)

@@ -1,0 +1,4 @@
+let networkTraffic = union isfuzzy=true CommonSecurityLog, AzureDiagnostics;
+networkTraffic
+| where (EventID == 'network_traffic.flow' or EventCategory in ('network', 'network_traffic'))
+| where Protocol == 'UDP' and DestinationPort == 4500

@@ -1,0 +1,11 @@
+let startTime = ago(2m);
+let endTime = now();
+let threshold = 10;
+let excludedSourceNetwork = "DMZ.T-Pot_Docker_Containers-VLAN30";
+CommonSecurityLog
+| where TimeGenerated between (startTime .. endTime)
+| where DestinationPort == 445
+| where SourceNetwork != excludedSourceNetwork
+| summarize DestinationCount = dcount(DestinationIp) by SourceIp, bin(TimeGenerated, 2m)
+| where DestinationCount >= threshold
+| extend EventName = "External SMB Scanning", EventDescription = "Detected 10 or more outbound connections to unique destination IPs over port 445, indicating potential SMB scanning.", Severity = 5, Credibility = 10, Relevance = 10, HighLevelCategory = "Application", LowLevelCategory = "SMB Session In Progress"
